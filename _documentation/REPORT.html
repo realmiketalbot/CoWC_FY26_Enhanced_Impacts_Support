@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Mike Talbot, Colorado State University">
+<meta name="dcterms.date" content="2026-05-08">
+
+<title>Flood Classification and Frequency Analysis: Methods and Decisions</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="REPORT_files/libs/clipboard/clipboard.min.js"></script>
+<script src="REPORT_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="REPORT_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="REPORT_files/libs/quarto-html/popper.min.js"></script>
+<script src="REPORT_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="REPORT_files/libs/quarto-html/anchor.min.js"></script>
+<link href="REPORT_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="REPORT_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="REPORT_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="REPORT_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="REPORT_files/libs/bootstrap/bootstrap-138a6193a3bd40baf1e627da441a4734.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Flood Classification and Frequency Analysis: Methods and Decisions</h1>
+<p class="subtitle lead">CoWC FY26 Enhanced Impacts — Technical Report</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Mike Talbot, Colorado State University </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">May 8, 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<div style="page-break-after: always;"></div>
+<section id="introduction" class="level1">
+<h1>1. Introduction</h1>
+<section id="motivation" class="level2">
+<h2 class="anchored" data-anchor-id="motivation">Motivation</h2>
+<p>Floods in the Colorado Rockies originate from at least three distinct hydrometeorological mechanisms: warm-season convective rainfall, spring snowmelt driven by solar radiation, and rain-on-snow (ROS) events where precipitation falls onto a melting snowpack and both fluxes combine to generate runoff. These mechanisms produce flood peaks with systematically different statistical characteristics. Extreme snowmelt floods are constrained by the available snow water equivalent, which limits upper-tail magnitudes, while convective rainfall events are not subject to the same physical bound and can generate more extreme short-duration peaks. Rain-on-snow events compound both fluxes and may produce the most extreme floods of all in high-elevation basins with large seasonal snowpacks.</p>
+<p>Classical flood frequency analysis (FFA) treats all peaks as exchangeable draws from a single population and fits a single distribution to the merged record. When flood-generating mechanisms are systematically different, this aggregation conflates populations with different distributional properties, biasing both the fitted distribution and the resulting quantile estimates. The mixture FFA framework of Yu et al.&nbsp;(2022) addresses this by fitting separate distributions to peaks of each process type and constructing a mixture survival function whose component CDFs are multiplied. The resulting mixture curve is formally motivated by the assumption that a flood exceeding a given level must arise from one of the contributing processes, and that exceedance by each process is approximately independent conditional on flood type.</p>
+<p>This report documents the classification and FFA pipeline developed for the CoWC FY26 Enhanced Impacts project, following the Yu et al.&nbsp;(2022) framework. It describes the three classification methods implemented, the methodological decisions made during development, and the key results.</p>
+</section>
+<section id="study-area-and-site-selection" class="level2">
+<h2 class="anchored" data-anchor-id="study-area-and-site-selection">Study Area and Site Selection</h2>
+<p>The study covers Colorado streamgages from the GAGES-II dataset, including both reference (minimally disturbed) and non-reference sites. Site metadata — including drainage area, mean basin elevation, upstream dam storage, and GAGES-II classification — were assembled from the standard GAGES-II attribute tables. Sites were flagged as regulated if upstream normal storage exceeded 1,000 acre-feet (1.233 Mm³), following the criterion used by Davenport et al. (2020). Of the 206 Colorado sites in the dataset, 63 are unregulated and are the primary sample for FFA. The full 206-site fleet is used for classification and diagnostic analysis.</p>
+</section>
+<section id="data" class="level2">
+<h2 class="anchored" data-anchor-id="data">Data</h2>
+<p><strong>USGS discharge.</strong> Daily maximum discharge was derived from USGS unit (15-minute) streamflow data accessed via the USGS Water Data API using the <code>dataRetrieval</code> R package. Peaks over threshold (POT) were identified using a per-site threshold equal to the 50th percentile of the daily maximum flow record, which also serves as the GPD location parameter <span class="math inline">\(\mu\)</span> in downstream frequency fitting following Yu et al.&nbsp;(2022). Peaks were declustered using the minimum time-separation criterion from Livneh et al.&nbsp;(2024): <span class="math inline">\(\theta = 5 + \ln(1.6092 \cdot A)\)</span> days, where <span class="math inline">\(A\)</span> is drainage area in km². The output contains approximately 21,000 distinct peaks across all 206 sites.</p>
+<p><strong>WLDAS hydrometeorological drivers.</strong> Antecedent rainfall and snowmelt were obtained from the Western Land Data Assimilation System (WLDAS), a Noah-MP land surface model product at 0.01° (~1 km) spatial resolution. Daily NetCDF files were processed using <code>exactextractr</code>, extracting basin-mean values for rainfall flux, snowfall flux, snowmelt flux (from the snowmelt parameterization in Noah-MP), and snow water equivalent (SWE). Flux variables were converted from kg m<span class="math inline">\(^{-2}\)</span> s<span class="math inline">\(^{-1}\)</span> to mm/day. Outputs were written as date-partitioned Parquet files and processed into 60-day accumulation curves for each POT peak.</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="classification-approaches-overview" class="level1">
+<h1>2. Classification Approaches Overview</h1>
+<p>Three flood classification methods were implemented and compared. Each method takes the same input — basin-averaged WLDAS antecedent fluxes over a per-peak antecedent window — and assigns each POT peak to one of three flood types (Rainfall, Snowmelt, Rain-on-Snow) or to an Unclassified category.</p>
+<p>The <strong>Davenport et al.&nbsp;(2020) fixed threshold method</strong> applies absolute accumulation thresholds (rain &gt; 10 mm, snowmelt &gt; 10 mm, with ambiguous zones at 5–10 mm) to 8-day antecedent totals. This method is the primary baseline from the literature and provides direct comparability with prior work on the Colorado River basin.</p>
+<p>The <strong>adaptive rain-fraction method</strong> (the primary analysis method) replaces raw accumulation totals with a scale-invariant rain fraction metric computed over a site-specific antecedent window derived from the basin’s characteristic response time. Classification boundaries were derived from a Gaussian mixture model (GMM) in rain fraction × log10(SWE + 1) space, then approximated by sequential logistic regression boundaries for interpretability and operational deployment. This method is the primary classification for FFA.</p>
+<p>The <strong>quartile method</strong> assigns peaks to population-level rain-fraction quartiles as a non-parametric alternative. It makes no claim that the quartile boundaries correspond to physically distinct flood-generating populations; instead, it tests whether continuous process dominance, ranked into quartiles, predicts upper-tail flood behavior. It is retained as a structural sensitivity check alongside the primary methods.</p>
+<p>All three methods apply the same Yu et al.&nbsp;(2022) minimum sample size filters (MIN_TYPE_SAMPLE = 20, MIN_SINGLE_SAMPLE = 25) and the same single-sample selection protocol, so differences in FFA output reflect classification structure rather than downstream analytical choices.</p>
+<div style="page-break-after: always;"></div>
+</section>
+<section id="fixed-depth-threshold-classification" class="level1">
+<h1>3. Fixed Depth Threshold Classification</h1>
+<section id="method-description" class="level2">
+<h2 class="anchored" data-anchor-id="method-description">3.1 Method Description</h2>
+<p>The Davenport et al.&nbsp;(2020) method classifies POT peaks using the total accumulated rainfall and snowmelt over a fixed 8-day antecedent window preceding each peak. The thresholds were calibrated using station data from the Colorado River basin and are intended to capture the dominant hydrometeorological forcing type. A peak is assigned to Snowmelt if antecedent snowmelt accumulation exceeds 10 mm and antecedent rainfall falls below 5 mm; to Rainfall if antecedent rainfall exceeds 10 mm and snowmelt falls below 5 mm; and to Rain-on-Snow if both fluxes exceed 5 mm simultaneously. Peaks that do not meet any of these criteria — including peaks with ambiguous intermediate signals or insufficient WLDAS coverage — are classified as Unclassified.</p>
+<p>The fixed 8-day window was chosen to capture the precipitation-to-runoff lag for typical western US watersheds. However, hydrologic response time scales vary systematically with basin size: small headwater catchments respond within hours, while large basins may require many days for a precipitation signal to propagate to the outlet. The Livneh et al.&nbsp;(2024) peak independence criterion encodes this scaling explicitly as <span class="math inline">\(\theta = 5 + \ln(1.6092 \cdot A)\)</span>, where <span class="math inline">\(A\)</span> is drainage area in km². Across Colorado GAGES-II sites, <span class="math inline">\(\theta\)</span> ranges from roughly 8 to 17 days, with most sites between 10 and 15 days. For sites where <span class="math inline">\(\theta &gt; 8\)</span>, the Davenport 8-day window discards antecedent forcing information that the independence criterion itself identifies as hydrologically relevant.</p>
+</section>
+<section id="decision-tree" class="level2">
+<h2 class="anchored" data-anchor-id="decision-tree">3.2 Decision Tree</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="classification_decisions/flowchart_davenport.png" class="img-fluid figure-img" width="550"></p>
+<figcaption>Decision tree for the Davenport et al.&nbsp;(2020) fixed depth threshold classification. Threshold values (5 mm and 10 mm) apply to total accumulated flux over an 8-day antecedent window.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output-display">
+<div id="fig-fixed-space" class="quarto-float quarto-figure quarto-figure-center anchored" width="624">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-fixed-space-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="REPORT_files/figure-html/fig-fixed-space-1.png" id="fig-fixed-space" class="img-fluid figure-img" width="624">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig quarto-uncaptioned" id="fig-fixed-space-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;1
+</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p>Figure X. Classification space for the fixed depth threshold approach. Points represent individual peak-over-threshold events colored by pre-demotion flood type (decision tree output prior to minimum sample size filtering). Dashed lines indicate the 5 mm and 10 mm boundaries for antecedent rainfall (vertical) and snowmelt (horizontal) used to assign events to Rainfall, Snowmelt, and Rain-on-Snow classes. Left panel: regulated sites; right panel: unregulated sites.</p>
+</section>
+<section id="rationale-for-retaining-literature-thresholds" class="level2">
+<h2 class="anchored" data-anchor-id="rationale-for-retaining-literature-thresholds">3.3 Rationale for Retaining Literature Thresholds</h2>
+<p>During development, FFA-based threshold optimization was attempted: candidate threshold values were varied across a grid, and the resulting FFA quantile estimates were evaluated for consistency across sites. This optimization proved inconclusive for two reasons. First, quantile estimates at 100-year return periods are sensitive to small changes in sample composition, introducing sampling noise that obscures the threshold signal. Second, and more fundamentally, the cross-type mass balance comparison on which optimization was implicitly based is not valid: rainfall-dominated peaks and snowmelt-dominated peaks occur in hydrologically distinct basin states (saturated versus frozen soils, respectively), and their runoff ratios reflect entirely different infiltration and curve-number regimes. Adjusting thresholds to equalize runoff ratios across types would not improve classification; it would conflate two physically distinct processes.</p>
+<p>The thresholds of Davenport et al.&nbsp;(2020) are well-established in the Colorado basin literature and were derived from a principled analysis of co-occurrence patterns in the WLDAS record. They reproduce a reasonable classification composition across Colorado sites, with snowmelt-dominated events concentrated in high-elevation basins and rainfall events more common at lower elevations — consistent with the known climatological structure of the region. For these reasons, the Davenport thresholds are retained without modification in Script 6a.</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="adaptive-classification" class="level1">
+<h1>4. Adaptive Classification</h1>
+<section id="method-description-1" class="level2">
+<h2 class="anchored" data-anchor-id="method-description-1">4.1 Method Description</h2>
+<p>The adaptive classification method (Script 6b) replaces the Davenport fixed accumulation thresholds with a scale-invariant feature — the weighted rain fraction (<code>rain_frac</code>) — computed over a site-specific antecedent window. The antecedent window length for each site is set equal to the Livneh et al.&nbsp;(2024) peak-independence criterion <span class="math inline">\(\theta = \lceil 5 + \ln(1.6092 \cdot A) \rceil\)</span> days (the <code>search_radius</code> parameter), so that the window defining event independence also defines the window over which antecedent forcing is accumulated.</p>
+<p>The rain fraction is defined as:</p>
+<p><span class="math display">\[\text{rain\_frac} = \frac{\sum_{d=1}^{W} \tilde{r}_d}{\sum_{d=1}^{W} (\tilde{r}_d + \tilde{m}_d)}\]</span></p>
+<p>where <span class="math inline">\(W\)</span> is <code>search_radius</code>, and <span class="math inline">\(\tilde{r}_d\)</span>, <span class="math inline">\(\tilde{m}_d\)</span> are rainfall and snowmelt flux on day <span class="math inline">\(d\)</span> set to zero if below a noise floor of 0.1 mm/day. Days where both fluxes fall below the noise floor contribute nothing to either the numerator or denominator. The resulting metric is bounded on <span class="math inline">\([0, 1]\)</span> and comparable across basins regardless of climatological flux magnitude.</p>
+<p>A second feature, mean basin SWE over the antecedent window (<code>swe_mean_mm</code>), was added following GMM analysis (Section 4.4) to improve separation of the Snowmelt and Rain-on-Snow populations in the two-dimensional feature space. The full classification uses <code>rain_frac</code> and <code>log10(swe_mean_mm + 1)</code> jointly.</p>
+</section>
+<section id="decision-tree-1" class="level2">
+<h2 class="anchored" data-anchor-id="decision-tree-1">4.2 Decision Tree</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="classification_decisions/flowchart_adaptive_report.png" class="img-fluid figure-img" width="550"></p>
+<figcaption>Decision tree for the adaptive classification method (Script 6b). Boundaries B1 and B2 are linear SVM boundaries in rain_frac x log10(SWE+1) space, derived at run time from G=4 EEV GMM class labels on interior events (0.01 &lt; rain_frac &lt; 0.99).</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Derived boundary coefficients:
+  B1_INTERCEPT = 0.4671  B1_SLOPE = 4.6660
+  B2_INTERCEPT = 0.1556  B2_SLOPE = 0.2987</code></pre>
+</div>
+<div class="cell-output-display">
+<div id="fig-gmm-fit" class="quarto-float quarto-figure quarto-figure-center anchored" width="624">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-gmm-fit-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="REPORT_files/figure-html/fig-gmm-fit-1.png" id="fig-gmm-fit" class="img-fluid figure-img" width="624">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig quarto-uncaptioned" id="fig-gmm-fit-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;2
+</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p>Figure X. Gaussian mixture model (GMM) fit (G = 4, EEV covariance structure) in the antecedent rainfall fraction × log10(SWE + 1) feature space. Points represent data-sufficient peak-over-threshold events, colored by GMM component assignment. Ellipses show 95% confidence regions for each component. The GMM reveals that flood events separate along both the rainfall fraction and SWE dimensions, motivating a bivariate rather than univariate classification boundary. G = 4 was selected over G = 3: without a second rainfall sub-component, the three-component optimizer expands the snowmelt component into ROS territory, shifts the ROS centroid to median rain_frac ≈ 0.67, and produces a B1 boundary with a physically nonsensible negative slope; the fourth component absorbs the rainfall sub-structure and frees snowmelt and ROS to occupy their natural regions. The dashed boundaries B1 (snowmelt/ROS, left) and B2 (ROS/rainfall, right) are derived at run time via linear SVM on interior events (0.01 &lt; rain_frac &lt; 0.99), with decision-function weights recovered by linear regression to avoid sign ambiguity (two-class accuracy: B1 = 98.3%, B2 = 97.4%); this replaces the previously hardcoded coefficients from a prior interactive session. The four-component solution reveals sub-structure within the rainfall-dominated zone (lower right), which is collapsed into a single Rainfall class as it reflects meteorological variation within rainfall-driven events rather than a distinct flood generation mechanism.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div id="fig-adaptive-space" class="quarto-float quarto-figure quarto-figure-center anchored" width="624">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-adaptive-space-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="REPORT_files/figure-html/fig-adaptive-space-1.png" id="fig-adaptive-space" class="img-fluid figure-img" width="624">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig quarto-uncaptioned" id="fig-adaptive-space-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;3
+</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p>Figure X. Classification space for the adaptive rain-fraction method. Points represent individual peak-over-threshold events colored by pre-demotion flood type (decision tree output prior to minimum sample size filtering). Dashed lines indicate the B1 boundary (separating Snowmelt from other classes) and the B2 boundary (separating Rain-on-Snow from Rainfall). Coverage failures (unclassified events with zero total antecedent flux) are excluded from this plot as they have no defined antecedent rainfall fraction. Left panel: regulated sites; right panel: unregulated sites.</p>
+</section>
+<section id="feature-selection" class="level2">
+<h2 class="anchored" data-anchor-id="feature-selection">4.3 Feature Selection</h2>
+<p>The adaptive classifier was designed iteratively. An earlier version included a second flux metric, <code>ros_flux_frac</code> — the fraction of total antecedent flux occurring during days where both rainfall and snowmelt were simultaneously above the noise floor. Diagnostic analysis showed this metric to be redundant: because <code>rain_frac</code> is defined as rain / (rain + melt), any peak reaching the Rain-on-Snow branch of the tree already has meaningful contributions from both fluxes by construction. Adding <code>ros_flux_frac</code> as a second feature shifted class boundaries without improving physical interpretability, and it was removed.</p>
+<p>An earlier design also included a longer snowmelt accumulation window (<code>SNOW_MULT × search_radius</code> days) to capture slow-melting events that might not be resolved within the shorter <code>search_radius</code> window. Diagnostic analysis of snowmelt classification fractions across multipliers 1×–5× showed these fractions to be essentially flat — the short window captures the relevant signal for classification — while the upper tail of <code>rain_frac</code> grows with multiplier length. This is consistent with bleeding across adjacent independent events: as the window expands beyond <code>search_radius</code>, it begins to incorporate rainfall from events that are, by the independence criterion, distinct from the target peak. The longer window was therefore removed. The final classifier uses <code>rain_frac</code> and <code>swe_mean_mm</code> over <code>search_radius</code> as its sole features.</p>
+<p>A further question concerned maximum cell versus basin-mean aggregation for spatial ROS detection. An alternative classification using the maximum across grid cells within the basin — rather than the basin mean — inflated the estimated ROS fraction from approximately 34% of peaks (basin-mean) to approximately 2% (cell maximum). The cell-maximum approach detects local co-occurrence of rain and snowmelt at individual pixels, which is stringent enough that nearly all events are excluded from ROS. Basin-mean aggregation was retained as the primary approach.</p>
+</section>
+<section id="gmm-boundary-derivation" class="level2">
+<h2 class="anchored" data-anchor-id="gmm-boundary-derivation">4.4 GMM Boundary Derivation</h2>
+<p>To move beyond judgment-based classification boundaries, a Gaussian mixture model was fit to the joint distribution of <code>rain_frac</code> and <code>log10(swe_mean_mm + 1)</code> across all data-sufficient POT peaks, using the <code>mclust</code> package. The optimal solution under the BIC criterion was a G = 4 component EEV (equal eigenvalue, equal volume) model. Inspection of the component structure showed that components 1 and 2 co-located in the high-<code>rain_frac</code>, low-SWE region (representing two rainfall-event sub-populations, perhaps distinguished by rainfall seasonality) and were merged to form the Rainfall population; component 4 occupied the high-SWE, low-<code>rain_frac</code> region (Snowmelt); and component 3 occupied the intermediate range (Rain-on-Snow). Two logistic regression boundaries approximate the GMM class boundaries for operational use:</p>
+<ul>
+<li><strong>Boundary B1</strong> separates Snowmelt from the other classes: <span class="math inline">\(\log_{10}(\text{SWE} + 1) = \beta_0^{(1)} + \beta_1^{(1)} \times \text{rain\_frac}\)</span> A peak is assigned to Snowmelt if its log-SWE coordinate lies <strong>above</strong> this line.</li>
+<li><strong>Boundary B2</strong> separates Rain-on-Snow from Rainfall: <span class="math inline">\(\text{rain\_frac} = \beta_0^{(2)} + \beta_1^{(2)} \times \log_{10}(\text{SWE} + 1)\)</span> A peak is assigned to Rain-on-Snow if its rain-fraction coordinate lies <strong>below</strong> this line (after ruling out Snowmelt).</li>
+</ul>
+<p>The boundary coefficients are derived at run time by fitting linear SVMs on interior events (0.01 &lt; rain_frac &lt; 0.99) using the merged GMM class labels (Section 4.4). The SVM boundaries reproduce the GMM assignments with two-class accuracy of 98.3% (B1) and 97.4% (B2). ROS distributions are fitted at sites where at least MIN_TYPE_SAMPLE = 20 ROS peaks are available; sites below this threshold have their ROS events absorbed into the remaining classes.</p>
+<p>A fixed <code>rain_frac</code> threshold — a vertical boundary in <code>rain_frac</code> × <span class="math inline">\(\log_{10}(\text{SWE} + 1)\)</span> space — was evaluated as a simpler alternative to the SWE-dependent B2 boundary. Fixed thresholds produced near-zero viable ROS sites across the range 0.10–0.40: genuine ROS events are structurally defined by co-occurrence of non-negligible rainfall and snowmelt, so the ROS population occupies intermediate <code>rain_frac</code> values at elevated SWE — a configuration that a fixed vertical boundary cannot isolate from the rainfall population at low SWE. The SWE-dependent B2 boundary is therefore retained.</p>
+</section>
+<section id="decision-tree-ordering" class="level2">
+<h2 class="anchored" data-anchor-id="decision-tree-ordering">4.5 Decision Tree Ordering</h2>
+<p>A subtle but consequential methodological decision concerns the ordering of the Snowmelt and Rain-on-Snow branches. In an earlier version of the classifier, the Snowmelt branch was evaluated before Rain-on-Snow: any peak with sufficiently high SWE and moderate rain fraction was classified as Snowmelt. Diagnostic analysis showed that approximately 17% of peaks classified as Snowmelt under this ordering had <code>rain_frac</code> values characteristic of genuine rain-burst signatures, consistent with short intense rainfall pulses driving runoff from a snowpack-covered basin. These peaks were being misclassified because their elevation of log-SWE placed them above Boundary B1, even though the short-window antecedent forcing was rain-dominated.</p>
+<p>Reversing the ordering — evaluating the Snowmelt branch <strong>before</strong> the Rain-on-Snow branch, as in the current implementation — resolves this. The Snowmelt criterion is now evaluated first: a peak is Snowmelt only if its log-SWE is high relative to its rain fraction as captured by Boundary B1. Peaks that would otherwise be elevated into Snowmelt by high SWE but have an elevated rain fraction are instead caught by the subsequent Rain-on-Snow branch. This ordering is physically motivated: Snowmelt events are defined by the <em>absence</em> of a meaningful rainfall signal, whereas Rain-on-Snow events require both.</p>
+</section>
+<section id="noise-floor-decision" class="level2">
+<h2 class="anchored" data-anchor-id="noise-floor-decision">4.6 Noise Floor Decision</h2>
+<p>No minimum flux threshold is applied to the antecedent window. All peaks with complete WLDAS temporal coverage and non-missing <code>rain_frac</code> are eligible for classification regardless of the magnitude of antecedent rainfall or snowmelt flux. This decision was supported by two diagnostic analyses: (1) a threshold sensitivity sweep varying the flux floor across 0.1–10.0 mm showed that the 100-year mixture GPD quantile was insensitive to the threshold choice across the range 0.1–2.0 mm at the median site; and (2) a peak discharge vs.&nbsp;WLDAS runoff mismatch analysis found no viable data-driven criterion for excluding low-flux peaks — the mismatch metric was near zero for sites above 1,500 m where the analysis is concentrated, and was confounded by runoff efficiency at lower elevations. Unclassified events are therefore limited to peaks outside WLDAS temporal coverage or with <code>NA</code> <code>rain_frac</code> (zero total antecedent flux).</p>
+</section>
+<section id="unclassified-events" class="level2">
+<h2 class="anchored" data-anchor-id="unclassified-events">4.7 Unclassified Events</h2>
+<p>Under the pure coverage criterion, a peak is Unclassified only if fewer than 90% of its <code>search_radius</code>-day antecedent window has WLDAS data. This occurs primarily at two margins: peaks predating the WLDAS archive (a coverage failure) and rare cases of partial windows at the temporal boundaries of the record. The fleet-wide unclassified rate ranges from approximately 15–25% across sites at the median, with the majority attributable to temporal coverage failures rather than to genuine classification ambiguity. The coverage-failure fraction is concentrated at the oldest sites with long records extending before the WLDAS archive start, and is not amenable to improvement through classification logic changes.</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="quartile-classification" class="level1">
+<h1>5. Quartile Classification</h1>
+<section id="motivation-1" class="level2">
+<h2 class="anchored" data-anchor-id="motivation-1">5.1 Motivation</h2>
+<p>The adaptive classifier assigns peaks to discrete flood-type populations defined by empirical GMM boundaries in a two-dimensional feature space. A natural question is whether the resulting type-level FFA quantiles are sensitive to the specific boundary placement, or whether a purely non-parametric rank-based scheme recovers similar results. The quartile method (Script 6c) addresses this by ignoring the GMM boundaries entirely and instead dividing data-sufficient peaks into four rain-fraction quartile bins based on the fleet-wide distribution of <code>rain_frac</code>. Quartile boundaries are computed from all data-sufficient peaks before any site-level top-<span class="math inline">\(n\)</span> filtering, so that the quartile labels reflect the full process-dominance spectrum of Colorado flood-generating events rather than the sample-size-filtered subset.</p>
+<p>The labels Q1 (most melt-dominated) through Q4 (most rainfall-dominated) are monotone in <code>rain_frac</code> by construction. If process-dominance rank predicts upper-tail flood magnitudes — the core hypothesis of mixture FFA — then the quartile scheme should recover the same cross-method ordering even if the specific type boundaries differ from the adaptive scheme.</p>
+</section>
+<section id="middle-bin-sparsity" class="level2">
+<h2 class="anchored" data-anchor-id="middle-bin-sparsity">5.2 Middle-Bin Sparsity</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="REPORT_files/figure-html/quartile-middle-bin-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>rain_frac distribution for site 09081600, with fleet-wide quartile boundaries (dashed lines) overlaid. The structural bimodality of within-site rain_frac distributions — mass concentrated near 0 (melt-dominated) and near 1 (rainfall-dominated) — means the Q2 and Q3 bins are nearly empty at this site. This pattern is typical across Colorado GAGES-II sites.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<p>The middle quartile bins (Q2 and Q3, spanning the 25th–75th percentile of the fleet-wide <code>rain_frac</code> distribution) are structurally sparse at nearly all Colorado GAGES-II sites. Within-site <code>rain_frac</code> distributions are strongly bimodal: the majority of events are either strongly melt-dominated (near 0) or strongly rainfall-dominated (near 1), with very few intermediate events. This bimodality reflects the climatological separation of spring melt seasons from summer convective seasons at most sites, with the intermediate rain-fraction range representing a minority of events that co-occur with remnant snowpack. As a consequence, the quartile scheme effectively reduces to a three-category system in practice — the fleet-wide Q2 and Q3 boundaries fall within the sparse interior of the within-site distribution, leaving Q2 and Q3 with insufficient events to meet the MIN_TYPE_SAMPLE threshold at most sites.</p>
+</section>
+<section id="retained-as-comparison-method" class="level2">
+<h2 class="anchored" data-anchor-id="retained-as-comparison-method">5.3 Retained as Comparison Method</h2>
+<p>Despite the middle-bin sparsity issue, the quartile method is retained in the analysis as a structural sensitivity comparison. Sites where both the adaptive and quartile methods produce viable Snowmelt and Rainfall fits provide a test of whether the GMM boundary placement affects the 100-year quantile estimates. If the two methods agree on FFA quantiles at the sites where both are viable, this provides evidence that the specific boundary locations in the adaptive method are not driving the results.</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="minimum-sample-size-thresholds-and-single-sample-alignment" class="level1">
+<h1>6. Minimum Sample Size Thresholds and Single-Sample Alignment</h1>
+<p>Following Yu et al.&nbsp;(2022), the FFA pipeline applies two minimum sample size thresholds: MIN_TYPE_SAMPLE = 20 (the minimum number of peaks of a given type at a given site required to fit a per-type GPD) and MIN_SINGLE_SAMPLE = 25 (the minimum number of peaks required to fit a single-population GPD). Sites falling below MIN_SINGLE_SAMPLE are excluded from FFA entirely. Types falling below MIN_TYPE_SAMPLE at a given site are demoted to Unclassified and excluded from the per-type fits; the remaining types contribute to the mixture.</p>
+<p>A key methodological decision concerns the ordering of the single-sample pool selection relative to the MIN_TYPE_SAMPLE demotion step. The single-sample pool consists of the top-<span class="math inline">\(n\)</span> peaks by discharge magnitude — one per water year up to MIN_SINGLE_SAMPLE peaks — irrespective of flood type. Yu et al.&nbsp;(2022) describe this pool as drawn from the full record before type-level filtering is applied. This is the logically correct ordering: the single-sample pool is a superset that should not depend on which types survive the MIN_TYPE_SAMPLE filter, because its purpose is to represent the overall flood frequency at the site.</p>
+<p>In earlier implementations of the fixed-threshold (Script 6a) and quartile (Script 6c) classifiers, the single-sample pool selection was inadvertently performed <em>after</em> the MIN_TYPE_SAMPLE demotion step. Peaks demoted to Unclassified were therefore excluded from the single-sample pool even though they represent genuine large flood events. This was corrected so that all three methods now perform the single-sample selection before demotion, consistent with the Yu et al.&nbsp;(2022) specification. The correction improved cross-method consistency in single-sample FFA quantiles and removed a systematic downward bias in estimated flood quantiles at sites with high demotion rates.</p>
+<div style="page-break-after: always;"></div>
+</section>
+<section id="ffa-fitting" class="level1">
+<h1>7. FFA Fitting</h1>
+<section id="distribution-family" class="level2">
+<h2 class="anchored" data-anchor-id="distribution-family">Distribution Family</h2>
+<p>Per-type flood frequency curves are fit using the Generalized Pareto Distribution (GPD), following the L-moment estimation procedure of Yu et al.&nbsp;(2022). The location parameter <span class="math inline">\(\mu\)</span> is fixed at the site-wide POT threshold (the median daily maximum discharge), and the scale (<span class="math inline">\(\sigma\)</span>) and shape (<span class="math inline">\(\xi\)</span>) parameters are estimated via L-moments using the <code>pargpa</code> function from the <code>lmomco</code> R package. L-moment estimation is preferred over maximum likelihood for small samples because it is unbiased and computationally robust.</p>
+<p>The GP quantile function is:</p>
+<p><span class="math display">\[Q(p) = \mu + \frac{\sigma}{\xi}\left[p^{-\xi} - 1\right]\]</span></p>
+<p>where <span class="math inline">\(p\)</span> is the PoT exceedance probability. The PoT recurrence interval is <span class="math inline">\(RI = 1/p\)</span>, which corresponds to approximately the annual exceedance probability when the PoT rate is near one event per year (as in Yu et al.&nbsp;2022).</p>
+<p>As a sensitivity check, the Log-Pearson Type III (LP3) distribution was also implemented, fit to the log-transformed peaks via L-moments using the <code>parpe3</code> function. The LP3 is the U.S. standard for annual peak flood frequency analysis (Bulletin 17C) and provides a benchmark for comparison. Results from the LP3 sensitivity check are available in <code>ffa_params_lp3.rds</code> and <code>ffa_quantiles_lp3.rds</code>.</p>
+</section>
+<section id="mixture-survival-function" class="level2">
+<h2 class="anchored" data-anchor-id="mixture-survival-function">Mixture Survival Function</h2>
+<p>The mixture FFA follows Yu et al.&nbsp;(2022) Equation 3, in which the mixture survival function is constructed as one minus the product of the per-type CDFs:</p>
+<p><span class="math display">\[S_{\text{mix}}(x) = 1 - \prod_{k \in \mathcal{K}} F_k(x)\]</span></p>
+<p>where <span class="math inline">\(\mathcal{K}\)</span> is the set of flood types with at least MIN_TYPE_SAMPLE peaks at the site. The GPD CDF is <span class="math inline">\(F_k(x) = 1 - [1 + \xi_k(x - \mu)/\sigma_k]^{-1/\xi_k}\)</span>. The mixture recurrence interval at discharge level <span class="math inline">\(x\)</span> is <span class="math inline">\(RI_{\text{mix}}(x) = 1 / S_{\text{mix}}(x)\)</span>. Mixture quantiles at target return periods are obtained by numerically inverting this relationship using <code>uniroot</code>.</p>
+</section>
+<section id="data-sufficiency" class="level2">
+<h2 class="anchored" data-anchor-id="data-sufficiency">Data Sufficiency</h2>
+<p>Types with fewer than MIN_TYPE_SAMPLE events at a given site are excluded from the mixture. Sites with fewer than MIN_SINGLE_SAMPLE total events across all types are excluded from FFA entirely. These thresholds are identical to those used by Yu et al.&nbsp;(2022) and were chosen to ensure that per-type GPD fits are based on enough events to yield meaningful parameter estimates, particularly for the shape parameter <span class="math inline">\(\xi\)</span>, which governs upper-tail behavior.</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="results" class="level1">
+<h1>8. Results</h1>
+<section id="classification-composition" class="level2">
+<h2 class="anchored" data-anchor-id="classification-composition">8.1 Classification Composition</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="REPORT_files/figure-html/composition-figure-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Classification composition across all three methods, showing the proportion of peaks assigned to each flood type using the pre-sample-size-filter (flood_type_raw) labels. The adaptive and Davenport methods show broadly similar rainfall and snowmelt fractions, while the quartile method distributes peaks uniformly across Q1–Q4 by construction. ‘Unclassified’ in all methods reflects incomplete WLDAS coverage.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="cross-method-100-year-flood-comparison" class="level2">
+<h2 class="anchored" data-anchor-id="cross-method-100-year-flood-comparison">8.2 Cross-Method 100-Year Flood Comparison</h2>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="REPORT_files/figure-html/cross-method-scatter-1.png" class="img-fluid figure-img" width="672"></p>
+<figcaption>Comparison of 100-year mixture GPD flood quantiles between the adaptive and Davenport methods. Points on or near the 1:1 line indicate agreement between the two classification approaches at a given site. Points are colored by the dominant flood type under the adaptive classification (the type contributing the most peaks to the mixture at each site). Sites with insufficient data for both methods (fewer than MIN_SINGLE_SAMPLE peaks) are excluded.</figcaption>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="dominant-flood-type-by-site-map" class="level2">
+<h2 class="anchored" data-anchor-id="dominant-flood-type-by-site-map">8.3 Dominant Flood Type by Site (Map)</h2>
+<p>[FIGURE PLACEHOLDER — Map of dominant flood type by site under the adaptive classification. This figure is best generated from the Shiny dashboard map tab (<code>app.R</code>), which renders per-site dominant type on an interactive base map. For the report, export the map panel as a PNG and insert here. Key expected spatial pattern: Snowmelt dominates at high-elevation headwater sites in the Rocky Mountains; Rainfall predominates at lower-elevation plains and foothill sites; Rain-on-Snow is concentrated at mid-elevation sites with persistent seasonal snowpacks.]</p>
+</section>
+<section id="gpd-shape-parameter-distributions-by-flood-type" class="level2">
+<h2 class="anchored" data-anchor-id="gpd-shape-parameter-distributions-by-flood-type">8.4 GPD Shape Parameter Distributions by Flood Type</h2>
+<p>[FIGURE PLACEHOLDER — GPD shape parameter (<span class="math inline">\(\xi\)</span>) distributions by flood type, following the style of Yu et al.&nbsp;(2022) Figure 2e. Expected pattern: <span class="math inline">\(\xi &gt; 0\)</span> (heavy tail) for Rainfall; <span class="math inline">\(\xi &lt; 0\)</span> or near zero (light to bounded tail) for Snowmelt; <span class="math inline">\(\xi\)</span> intermediate for Rain-on-Snow. This figure is available from <code>ffa_params_gpd.rds</code> by filtering to per-type fits and plotting the <span class="math inline">\(\xi\)</span> column grouped by flood type. Code stub:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>ffa_p <span class="sc">%&gt;%</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(curve_type <span class="sc">!=</span> <span class="st">"mixture"</span>, <span class="sc">!</span><span class="fu">is.na</span>(xi)) <span class="sc">%&gt;%</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> xi, <span class="at">fill =</span> flood_type)) <span class="sc">+</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_density</span>(<span class="at">alpha =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span>method) <span class="sc">+</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>]</p>
+<div style="page-break-after: always;"></div>
+</section>
+</section>
+<section id="limitations-and-future-work" class="level1">
+<h1>9. Limitations and Future Work</h1>
+<p><strong>WLDAS spatial resolution.</strong> WLDAS operates at approximately 12.5 km grid spacing across CONUS. Colorado’s complex mountain terrain features elevation gradients of hundreds of meters per kilometer, and basin-averaged values at this resolution mask important sub-basin variability in snowmelt timing, rainfall intensity, and frozen-soil infiltration capacity. The classification is therefore an approximation based on spatially smoothed forcing, and the boundaries derived from GMM analysis reflect patterns in the smoothed rather than the point-scale signal.</p>
+<p><strong>Daily versus instantaneous peak flows.</strong> The analysis uses the maximum daily discharge within each POT event, whereas the physical flood peak is instantaneous. For small basins with short concentration times, the daily maximum may substantially underestimate the true peak. Yu et al.&nbsp;(2022) note that the mixture effect — the departure of the mixture quantile curve from a single-population fit — is likely stronger at the instantaneous scale, where within-type variability is lower and between-type differences more pronounced. The daily-aggregated results reported here should therefore be interpreted as a conservative estimate of the mixture effect.</p>
+<p><strong>Rain-on-Snow viability.</strong> At sites where fewer than MIN_TYPE_SAMPLE ROS events are identified, the ROS component is excluded from the mixture and its contribution is implicitly absorbed into the remaining types. ROS viability is lowest at very high elevations (where rainfall in the antecedent window is rare) and at very low elevations (where seasonal snowpack is absent). The 37 sites with viable ROS samples under the adaptive scheme are predominantly at mid to upper mid elevations. Future work could explore whether a relaxed MIN_TYPE_SAMPLE (e.g., 10–15) would meaningfully expand the viable ROS set without destabilizing parameter estimates.</p>
+<p><strong>Climate nonstationarity.</strong> The analysis treats all years of record as equally representative of current flood hazard. Evidence from the broader literature suggests that snowmelt-driven flood magnitudes have declined in the western US as temperatures have risen, while extreme rainfall events have increased. The fitted distributions therefore represent a mixture of historical conditions rather than a stationary representation of current or future hazard. Nonstationary FFA methods incorporating climate covariates would be a natural extension.</p>
+<p><strong>Higher-resolution land surface model output.</strong> The Basin Characterization Model (BCM) and similar products provide spatially distributed runoff estimates at finer resolution than WLDAS. A comparison of WLDAS-based classifications with BCM-based classifications at a subset of sites would help characterize the sensitivity of the mixture FFA results to the choice of land surface forcing product.</p>
+<div style="page-break-after: always;"></div>
+</section>
+<section id="references" class="level1">
+<h1>10. References</h1>
+<p>Davenport, F. V., Herrera-Estrada, J. E., Burke, M., &amp; Diffenbaugh, N. S. (2020). Flood size increases nonlinearly across the western United States in response to lower snow-precipitation ratios. <em>Water Resources Research</em>, 56(1), e2019WR025571. https://doi.org/10.1029/2019WR025571</p>
+<p>Hosking, J. R. M., &amp; Wallis, J. R. (1997). <em>Regional Frequency Analysis: An Approach Based on L-Moments</em>. Cambridge University Press.</p>
+<p>Livneh, B., Deems, J. S., Schneider, D., Barsugli, J. J., &amp; Molotch, N. P. (2014). Filling in the gaps: Inferring spatially distributed precipitation from gauge observations over complex terrain. <em>Water Resources Research</em>, 50(11), 8589–8610. [Used for the peak independence separation criterion <span class="math inline">\(\theta = 5 + \ln(1.6092 \cdot A)\)</span>.]</p>
+<p>Yu, G., Wright, D. B., &amp; Li, Z. (2022). Non-stationary flood frequency analysis using a mixture distribution approach: A case study for floods in the western United States. <em>Water Resources Research</em>, 58(1), e2021WR031134. https://doi.org/10.1029/2021WR031134</p>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

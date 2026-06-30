@@ -1,0 +1,66 @@
+
+> cat("End-member sensitivity diagnostic\n")
+End-member sensitivity diagnostic
+
+> cat(format(Sys.time()), "\n\n")
+2026-05-08 10:16:18 
+
+
+> cat(sprintf("Peaks (full):     %d\n", n_full))
+Peaks (full):     6415
+
+> cat(sprintf("Peaks (interior): %d  (filter: rain_frac in (%.2f, %.2f))\n",
++             nrow(peaks_interior), END_MEMBER_LO, END_MEMBER_HI))
+Peaks (interior): 2442  (filter: rain_frac in (0.01, 0.99))
+
+> cat(sprintf("Excluded by filter: %d (%.1f%%)\n\n",
++             n_low + n_high, 100 * (n_low + n_high) / n_full))
+Excluded by filter: 3973 (61.9%)
+
+
+> cat("Coefficient summary:\n")
+Coefficient summary:
+
+> print(coef_table, n = Inf, width = Inf)
+# A tibble: 4 × 7
+  configuration             B1_INT B1_SLP B2_INT B2_SLP n_gmm n_bnd
+  <chr>                      <dbl>  <dbl>  <dbl>  <dbl> <int> <int>
+1 A_baseline                 0.982   4.57  0.222  0.159  6415  6415
+2 B_boundary_filter          1.10    3.90 -0.291  0.583  6415  2442
+3 C_gmm_and_boundary_filter  0.976  10.7   0.232  0.213  2442  2442
+4 current_6b_reference       0.497   5.34  0.108  0.350    NA    NA
+
+> cat("\n\nClassification agreement vs. merged GMM labels:\n")
+
+
+Classification agreement vs. merged GMM labels:
+
+> print(agreement_table, n = Inf, width = Inf)
+# A tibble: 9 × 5
+  configuration             class    n_true precision recall
+  <chr>                     <chr>     <int>     <dbl>  <dbl>
+1 A_baseline                snowmelt   1309     0.934  0.991
+2 A_baseline                ROS         567     0.939  0.813
+3 A_baseline                rainfall   4539     0.997  0.996
+4 B_boundary_filter         snowmelt   1271     0.916  0.993
+5 B_boundary_filter         ROS         499     0.978  0.800
+6 B_boundary_filter         rainfall   4645     0.997  0.993
+7 C_gmm_and_boundary_filter snowmelt    998     0.822  0.966
+8 C_gmm_and_boundary_filter ROS         961     0.934  0.745
+9 C_gmm_and_boundary_filter rainfall   4456     0.992  0.996
+
+> cat("\n\nParity check (configuration A vs. current 6b values):\n")
+
+
+Parity check (configuration A vs. current 6b values):
+
+> print(parity, n = Inf, width = Inf)
+# A tibble: 4 × 5
+  coef   current diag_A abs_diff rel_diff
+  <chr>    <dbl>  <dbl>    <dbl>    <dbl>
+1 B1_INT   0.497  0.982    0.485    0.975
+2 B1_SLP   5.34   4.57     0.769    0.144
+3 B2_INT   0.108  0.222    0.114    1.06 
+4 B2_SLP   0.350  0.159    0.191    0.546
+
+> sink()

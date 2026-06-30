@@ -1,0 +1,105 @@
+Antecedent Window Diagnostic — Summary Report
+Generated: 2026-06-22 06:53:10.374345
+
+------------------------------------------------------------
+SEARCH_RADIUS DISTRIBUTION (one value per site)
+------------------------------------------------------------
+  n sites         : 206
+  min             : 7 days
+  median          : 12 days
+  mean            : 12.34 days
+  max             : 17 days
+  frac < 8 days   : 0.0049
+  frac == 8 days  : 0.0146
+  frac > 8 days   : 0.9806
+  W3 (rounded median) : 12 days
+
+------------------------------------------------------------
+MIXED_SPLIT (stored attribute on frac_thresh_3class output)
+------------------------------------------------------------
+  MIXED_SPLIT     : 0.2979
+  RAIN_FRAC_THRESH: 0.99
+
+------------------------------------------------------------
+CLASSIFICATION CHANGE: W1 (fixed 8d) substituted for W2 (adaptive)
+------------------------------------------------------------
+  Overall: 0.0672 of peaks change class  (1360 / 20234)
+
+  By flood_type and regulation:
+# A tibble: 8 × 5
+  flood_type   regulated n_peaks n_changes frac_changes
+  <fct>        <lgl>       <int>     <int>        <dbl>
+1 rainfall     FALSE        3233         6      0.00186
+2 rainfall     TRUE         5760        29      0.00503
+3 snowmelt     FALSE        1432        47      0.0328 
+4 snowmelt     TRUE         2577       185      0.0718 
+5 rain_on_snow FALSE         489        73      0.149  
+6 rain_on_snow TRUE         2974       572      0.192  
+7 unclassified FALSE        1143       132      0.115  
+8 unclassified TRUE         2626       316      0.120  
+
+------------------------------------------------------------
+COLUMN SCHEMA DISCREPANCIES
+------------------------------------------------------------
+
+Antecedent-window columns in depth_thresh:
+   n_days_wldas
+   complete_window
+
+Antecedent-window columns in frac_thresh_3class:
+   search_radius
+   antecedent_runoff_mm
+   antecedent_days_used
+   short_window
+   n_days_data
+   data_sufficient
+
+Columns in depth_thresh ONLY:
+   total_rain_mm
+   total_melt_mm
+   n_days_wldas
+   complete_window
+
+Columns in frac_thresh_3class ONLY:
+   search_radius
+   antecedent_runoff_mm
+   antecedent_days_used
+   short_window
+   total_rain_flux
+   total_melt_flux
+   total_flux
+   n_days_data
+   rain_frac
+   data_sufficient
+
+------------------------------------------------------------
+NOTE: No methodological recommendation is made in this file.
+------------------------------------------------------------
+
+------------------------------------------------------------
+EXTENDED DIAGNOSTIC — OPERATIONAL IMPACT OF W1 (fixed 8d)
+------------------------------------------------------------
+  NA rain_frac rate under W1          : 0.0460  (976 / 21211)
+  NA rain_frac rate under W2          : 0.0267  (567 / 21211)
+  Peaks reclassified to unclassified  : 321 / 16786 (1.9%)
+    - Due to data insufficiency       : 0
+    - Due to NA rain_frac             : 321
+  Site-type combinations viable W2    : 363
+  Site-type combinations losing viability under W1 : 33
+    - rainfall    : 1
+    - snowmelt    : 5
+    - rain_on_snow: 27
+
+------------------------------------------------------------
+EXTENDED DIAGNOSTIC — OPERATIONAL IMPACT OF W1 (fixed 8d)
+------------------------------------------------------------
+  NA rain_frac rate under W1          : 0.0460  (976 / 21211)
+  NA rain_frac rate under W2          : 0.0267  (567 / 21211)
+  Peaks reclassified to unclassified  : 321 / 16786 (1.9%)
+    - Due to data insufficiency       : 0
+    - Due to NA rain_frac             : 321
+  Site-type combinations viable W2    : 363
+  Site-type combinations losing viability under W1 : 33
+    - rainfall    : 1
+    - snowmelt    : 5
+    - rain_on_snow: 27

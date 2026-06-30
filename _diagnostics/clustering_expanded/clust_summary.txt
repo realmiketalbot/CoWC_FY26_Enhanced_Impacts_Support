@@ -1,0 +1,35 @@
+=== Clustering Diagnostic Summary (Expanded Feature Space) ===
+Peaks in scope : 6076 (63 sites, unregulated, data-sufficient)
+Features       : rain_frac, ros_flux_frac, swe_log1p, doy_sin, doy_cos
+Best GMM k     : 6  (model: VEV, BIC = 43301.7)
+
+--- Cluster centroids (interpretable units) ---
+  cluster rain_frac ros_flux_frac swe_mean_mm doy_approx
+1       1      0.42          0.43       16.43        131
+2       2      1.00          0.00        0.00        205
+3       3      1.00          0.00        0.00        158
+4       4      1.00          0.00        0.00        235
+5       5      1.00          0.00        0.02        288
+6       6      1.00          0.00        0.00        258
+
+--- Cluster sizes ---
+
+   1    2    3    4    5    6 
+3193  708  664  589  407  515 
+
+--- Uncertainty summary ---
+    Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
+0.000000 0.000000 0.000000 0.002258 0.000000 0.474815 
+  Peaks with uncertainty > 0.20 : 24 (0.4%)
+  Peaks with uncertainty > 0.40 : 10 (0.2%)
+
+--- GMM vs 6b confusion (counts) ---
+# A tibble: 6 × 5
+  gmm_cluster rainfall snowmelt   ROS unclassified
+  <fct>          <int>    <int> <int>        <int>
+1 1                547      123   856         1667
+2 2                666        0     0           42
+3 3                646        0     0           18
+4 4                555        0     0           34
+5 5                400        0     0            7
+6 6                483        0     0           32

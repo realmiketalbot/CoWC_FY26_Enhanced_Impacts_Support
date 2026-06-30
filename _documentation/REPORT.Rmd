@@ -1,0 +1,1080 @@
+---
+title: "Flood Classification and Frequency Analysis: Methods and Decisions"
+subtitle: "CoWC FY26 Enhanced Impacts — Technical Report"
+author: "Mike Talbot, Colorado State University"
+date: "`r Sys.Date()`"
+output:
+  word_document:
+    toc: true
+    toc_depth: 3
+    reference_doc: null   # update if a reference .docx is placed in _documentation/
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 7,
+  fig.height = 5
+)
+
+library(tidyverse)
+library(lmomco)
+library(DiagrammeR)
+library(DiagrammeRsvg)
+library(rsvg)
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+peaks_dt   <- readRDS("../_data/pot_peaks_classified_depth_thresh.rds")
+peaks_frac <- readRDS("../_data/pot_peaks_classified_frac_thresh_3class.rds")
+ffa_q      <- readRDS("../_data/ffa_quantiles_gpd.rds")
+ffa_p      <- readRDS("../_data/ffa_params_gpd.rds")
+meta       <- readRDS("../_data/site_metadata.rds")
+
+climate_trends <- readRDS("../_data/climate_forcing_trends.rds")
+fft_trends     <- readRDS("../_data/temporal_trends_frac_thresh_3class.rds")
+fig_dir    <- "../_documentation/report_figures"
+dir.create(fig_dir, showWarnings = F)
+
+# ── Shared style ──────────────────────────────────────────────────────────────
+# Colors match app.R type_colors
+TYPE_COLORS <- c(
+  "Rainfall"      = "#b2182b",
+  "Snowmelt"      = "#2166ac",
+  "Rain-on-Snow"  = "#9970ab",
+  "Unclassified"  = "#cccccc"
+)
+
+# Helper: render a grViz object to PNG and return the path
+save_grViz_png <- function(gv, filename, width = 1200) {
+  path <- file.path("classification_decisions", filename)
+  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
+  gv %>%
+    export_svg() %>%
+    charToRaw() %>%
+    rsvg_png(file = path, width = width)
+  path
+}
+```
+
+\newpage
+
+# 1. Introduction
+
+## Motivation
+
+Floods in the Colorado Rockies originate from at least three distinct
+hydrometeorological mechanisms: warm-season convective rainfall, spring snowmelt
+driven by solar radiation, and rain-on-snow (ROS) events where precipitation
+falls onto a melting snowpack and both fluxes combine to generate runoff. These
+mechanisms produce flood peaks with systematically different statistical
+characteristics. Extreme snowmelt floods are constrained by the available snow
+water equivalent, which limits upper-tail magnitudes, while convective rainfall
+events are not subject to the same physical bound and can generate more extreme
+short-duration peaks. Rain-on-snow events compound both fluxes and may produce
+the most extreme floods of all in high-elevation basins with large seasonal
+snowpacks.
+
+Classical flood frequency analysis (FFA) treats all peaks as exchangeable
+draws from a single population and fits a single distribution to the merged
+record. When flood-generating mechanisms are systematically different, this
+aggregation conflates populations with different distributional properties,
+biasing both the fitted distribution and the resulting quantile estimates. The
+mixture FFA framework of Yu et al. (2022) addresses this by fitting separate
+distributions to peaks of each process type and constructing a mixture survival
+function whose component CDFs are multiplied. The resulting mixture curve is
+formally motivated by the assumption that a flood exceeding a given level must
+arise from one of the contributing processes, and that exceedance by each
+process is approximately independent conditional on flood type.
+
+This report documents the classification and FFA pipeline developed for the
+CoWC FY26 Enhanced Impacts project, following the Yu et al. (2022) framework.
+It describes the three classification methods implemented, the methodological
+decisions made during development, and the key results.
+
+## Study Area and Site Selection
+
+The study covers Colorado streamgages from the GAGES-II dataset, including both
+reference (minimally disturbed) and non-reference sites. Site metadata —
+including drainage area, mean basin elevation, upstream dam storage, and
+GAGES-II classification — were assembled from the standard GAGES-II attribute
+tables. Sites were flagged as regulated if upstream normal storage exceeded
+1,000 acre-feet (1.233 Mm³), following the criterion used by Davenport et al.
+(2020). Of the 206 Colorado sites in the dataset, 63 are unregulated and are
+the primary sample for FFA. The full 206-site fleet is used for classification
+and diagnostic analysis.
+
+## Data
+
+**USGS discharge.** Daily maximum discharge was derived from USGS unit
+(15-minute) streamflow data accessed via the USGS Water Data API using the
+`dataRetrieval` R package. Peaks over threshold (POT) were identified using a
+per-site threshold equal to the 50th percentile of the daily maximum flow
+record, which also serves as the GPD location parameter $\mu$ in downstream
+frequency fitting following Yu et al. (2022). Peaks were declustered using the
+minimum time-separation criterion from Livneh et al. (2024):
+$\theta = 5 + \ln(1.6092 \cdot A)$ days, where $A$ is drainage area in km².
+The output contains approximately 21,000 distinct peaks across all 206 sites.
+
+**WLDAS hydrometeorological drivers.** Antecedent rainfall and snowmelt were
+obtained from the Western Land Data Assimilation System (WLDAS), a Noah-MP
+land surface model product at 0.01° (~1 km) spatial resolution. Daily NetCDF
+files were processed using `exactextractr`, extracting basin-mean values for
+rainfall flux, snowfall flux, snowmelt flux (from the snowmelt parameterization
+in Noah-MP), and snow water equivalent (SWE). Flux variables were converted from
+kg m$^{-2}$ s$^{-1}$ to mm/day. Outputs were written as date-partitioned
+Parquet files and processed into 60-day accumulation curves for each POT peak.
+
+\newpage
+
+# 2. Classification Approaches Overview
+
+Three flood classification methods were implemented and compared. Each method
+takes the same input — basin-averaged WLDAS antecedent fluxes over a per-peak
+antecedent window — and assigns each POT peak to one or more flood types.
+
+The **Depth threshold method** (Script 6a) applies the absolute accumulation
+thresholds of Davenport et al. (2020) to 8-day antecedent totals of rainfall and
+snowmelt flux. Peaks are assigned to Rainfall, Snowmelt, Rain-on-Snow, or
+Unclassified based on whether each flux exceeds 10 mm or falls below 5 mm over
+the fixed window. This method is the primary baseline from the literature and
+provides direct comparability with prior work on the Colorado River basin.
+
+The **Rain fraction (3-class) method** (Script 6b) replaces raw accumulation
+totals with a scale-invariant rain fraction metric (`rain_frac`) computed over a
+site-specific antecedent window derived from the basin's characteristic response
+time. Classification uses two thresholds applied sequentially: peaks with
+`rain_frac >= 0.99` are assigned to Rainfall; remaining mixed events are split at
+the population-level median rain fraction (MIXED_SPLIT = 0.2979) into Snowmelt
+(below) and Rain-on-Snow (above). The Snowmelt and Rain-on-Snow labels are
+operationally defined — they describe position in the mixed-event rain fraction
+distribution, not direct physical process attribution. This method is the primary
+classification for FFA.
+
+The **Rain fraction (2-class) method** is a downstream remap produced in Script 7
+that collapses the Snowmelt and Rain-on-Snow classes from the 3-class output into
+a single Non-Rainfall class, yielding a two-type (Rainfall, Non-Rainfall)
+classification. It provides a structural sensitivity check: if the boundary
+between Snowmelt and Rain-on-Snow within the mixed-event pool does not
+meaningfully differentiate upper-tail flood magnitudes, the 2-class and 3-class
+mixture curves should converge.
+
+All three methods apply the same Yu et al. (2022) minimum sample size filters
+(MIN_TYPE_SAMPLE = 20, MIN_SINGLE_SAMPLE = 25) and the same single-sample
+selection protocol, so differences in FFA output reflect classification
+structure rather than downstream analytical choices.
+
+\newpage
+
+# 3. Fixed Depth Threshold Classification
+
+## 3.1 Method Description
+
+The Davenport et al. (2020) method classifies POT peaks using the total
+accumulated rainfall and snowmelt over a fixed 8-day antecedent window
+preceding each peak. The thresholds were calibrated using station data from the
+Colorado River basin and are intended to capture the dominant hydrometeorological
+forcing type. A peak is assigned to Snowmelt if antecedent snowmelt accumulation
+exceeds 10 mm and antecedent rainfall falls below 5 mm; to Rainfall if
+antecedent rainfall exceeds 10 mm and snowmelt falls below 5 mm; and to
+Rain-on-Snow if both fluxes exceed 5 mm simultaneously. Peaks that do not meet
+any of these criteria — including peaks with ambiguous intermediate signals or
+insufficient WLDAS coverage — are classified as Unclassified.
+
+The fixed 8-day window was chosen to capture the precipitation-to-runoff lag
+for typical western US watersheds. However, hydrologic response time scales vary
+systematically with basin size: small headwater catchments respond within hours,
+while large basins may require many days for a precipitation signal to propagate
+to the outlet. The Livneh et al. (2024) peak independence criterion encodes this
+scaling explicitly as $\theta = 5 + \ln(1.6092 \cdot A)$, where $A$ is drainage
+area in km². Across Colorado GAGES-II sites, $\theta$ ranges from roughly 8 to
+17 days, with most sites between 10 and 15 days. For sites where $\theta > 8$,
+the Davenport 8-day window discards antecedent forcing information that the
+independence criterion itself identifies as hydrologically relevant.
+
+## 3.2 Decision Tree
+
+```{r davenport-flowchart, fig.cap = "Decision tree for the Davenport et al. (2020) fixed depth threshold classification. Threshold values (5 mm and 10 mm) apply to total accumulated flux over an 8-day antecedent window."}
+gv_dav <- grViz("
+digraph davenport {
+
+  graph [layout = dot, rankdir = TB, fontname = 'Helvetica', splines = polyline]
+  node  [fontname = 'Helvetica', fontsize = 13, margin = 0.25]
+  edge  [fontname = 'Helvetica', fontsize = 11]
+
+  input [label = 'POT peak event\n(8-day antecedent window)',
+         shape = rectangle, style = filled, fillcolor = '#f0f0f0',
+         width = 3.2, penwidth = 1.5]
+
+  d1 [label = 'Complete WLDAS window?\nn_days_data >= 0.90 x 8',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 4.0, height = 1.8, penwidth = 1.5, fixedsize = true]
+
+  d2 [label = 'Snowmelt > 10 mm\nAND Rain < 5 mm?',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 3.0, height = 1.6, penwidth = 1.5, fixedsize = true]
+
+  d3 [label = 'Rain > 10 mm\nAND Snowmelt < 5 mm?',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 3.0, height = 1.6, penwidth = 1.5, fixedsize = true]
+
+  d4 [label = 'Both Rain > 5 mm\nAND Snowmelt > 5 mm?',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 3.0, height = 1.6, penwidth = 1.5, fixedsize = true]
+
+  t_unc1 [label = 'Unclassified\n(no WLDAS)',
+           shape = ellipse, style = filled, fillcolor = '#d9d9d9',
+           width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_snow [label = 'Snowmelt',
+          shape = ellipse, style = filled, fillcolor = '#2166ac',
+          fontcolor = 'white', width = 2.0, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_rain [label = 'Rainfall',
+          shape = ellipse, style = filled, fillcolor = '#b2182b',
+          fontcolor = 'white', width = 2.0, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_ros  [label = 'Rain-on-Snow',
+          shape = ellipse, style = filled, fillcolor = '#9970ab',
+          fontcolor = 'white', width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_unc2 [label = 'Unclassified\n(ambiguous)',
+           shape = ellipse, style = filled, fillcolor = '#d9d9d9',
+           width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  input -> d1
+  d1 -> t_unc1 [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d1 -> d2     [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d2 -> t_snow [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d2 -> d3     [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d3 -> t_rain [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d3 -> d4     [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d4 -> t_ros  [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d4 -> t_unc2 [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+}
+")
+
+png_path <- save_grViz_png(gv_dav, "flowchart_davenport.png", width = 1100)
+knitr::include_graphics(png_path)
+```
+
+```{r fig-fixed-space, fig.width = 6.5, fig.height = 4}
+# peaks_dt flux columns are total_rain_mm and total_melt_mm (8-day antecedent totals).
+# Values <= 0 are recoded to 0.01 before log10 scaling to handle structural zeros
+# (no rainfall or snowmelt during the window) without silently dropping rows.
+type_colors_dt <- c(
+  "rainfall"     = "#b2182b",
+  "snowmelt"     = "#2166ac",
+  "rain_on_snow" = "#9970ab",
+  "unclassified" = "#cccccc"
+)
+
+set.seed(42L)
+plot_dt <- peaks_dt %>%
+  dplyr::mutate(
+    flood_type_plot = as.character(flood_type_raw),
+    rain_plot = dplyr::if_else(
+      is.na(total_rain_mm) | total_rain_mm <= 0, 0.01, total_rain_mm),
+    melt_plot = dplyr::if_else(
+      is.na(total_melt_mm) | total_melt_mm <= 0, 0.01, total_melt_mm)
+  ) %>%
+  dplyr::group_by(flood_type_plot) %>%
+  dplyr::slice_sample(prop = 1) %>%
+  #dplyr::slice_head(n = 1000L) %>% # limit the number of points plotted if necessary
+  dplyr::ungroup() %>%
+  dplyr::arrange(flood_type_plot != "unclassified")
+
+ggplot2::ggplot(plot_dt,
+                ggplot2::aes(x = rain_plot, y = melt_plot, colour = flood_type_plot)) +
+  ggplot2::geom_point(shape = 16, size = 0.5, alpha = 0.3) +
+  ggplot2::geom_vline(xintercept = c(5, 10), linetype = "dashed",
+                      colour = "black", linewidth = 0.6) +
+  ggplot2::geom_hline(yintercept = c(5, 10), linetype = "dashed",
+                      colour = "black", linewidth = 0.6) +
+  ggplot2::scale_x_log10(
+    name   = "Antecedent Rainfall (mm)",
+    oob    = scales::squish,
+    limits = c(0.01, NA)
+  ) +
+  ggplot2::scale_y_log10(
+    name   = "Antecedent Snowmelt (mm)",
+    oob    = scales::squish,
+    limits = c(0.01, NA)
+  ) +
+  ggplot2::scale_colour_manual(
+    values = type_colors_dt,
+    breaks = c("rainfall", "snowmelt", "rain_on_snow", "unclassified"),
+    labels = c("rainfall"     = "Rainfall",
+               "snowmelt"     = "Snowmelt",
+               "rain_on_snow" = "Rain-on-Snow",
+               "unclassified" = "Unclassified"),
+    name = "Flood Type"
+  ) +
+  ggplot2::theme_bw(base_size = 11) +
+  ggplot2::theme(
+    panel.grid.minor = ggplot2::element_blank(),
+    legend.position  = "right"
+  ) +
+  ggplot2::guides(colour = ggplot2::guide_legend(
+    override.aes = list(size = 3, alpha = 1, shape = 16)
+  ))
+
+ggsave(file.path(fig_dir, "decision_space_fixed.png"), width = 6.5, height = 4, units = "in")
+```
+
+Figure X. Classification space for the fixed depth threshold approach. Points represent individual peak-over-threshold events colored by pre-demotion flood type (decision tree output prior to minimum sample size filtering). Dashed lines indicate the 5 mm and 10 mm boundaries for antecedent rainfall (vertical) and snowmelt (horizontal) used to assign events to Rainfall, Snowmelt, and Rain-on-Snow classes. Left panel: regulated sites; right panel: unregulated sites.
+
+## 3.3 Rationale for Retaining Literature Thresholds
+
+The thresholds of Davenport et al. (2020) are well-established in the Colorado
+basin literature and were derived from a principled analysis of co-occurrence
+patterns in the WLDAS record. They reproduce a reasonable classification
+composition across Colorado sites, with snowmelt-dominated events concentrated
+in high-elevation basins and rainfall events more common at lower elevations —
+consistent with the known climatological structure of the region.
+
+A data-driven approach to threshold selection is not viable here for a
+fundamental physical reason: rainfall-dominated peaks and snowmelt-dominated
+peaks occur in hydrologically distinct basin states (saturated versus frozen
+soils, respectively), and their runoff ratios reflect entirely different
+infiltration regimes. Optimizing boundaries to equalize cross-type runoff ratios
+would conflate two physically distinct processes rather than improve
+classification fidelity. The Davenport thresholds are therefore retained without
+modification in Script 6a.
+
+\newpage
+
+# 4. Rain Fraction Classification
+
+## 4.1 Method Description
+
+The rain fraction classification (Script 6b) replaces the Davenport fixed
+accumulation thresholds with a scale-invariant feature — the weighted rain
+fraction (`rain_frac`) — computed over a site-specific antecedent window. The
+antecedent window length for each site is set equal to the Livneh et al. (2024)
+peak-independence criterion $\theta = \lceil 5 + \ln(1.6092 \cdot A) \rceil$
+days (the `search_radius` parameter), so that the window defining event
+independence also defines the window over which antecedent forcing is
+accumulated.
+
+The rain fraction is defined as:
+
+$$\text{rain\_frac} = \frac{\sum_{d=1}^{W} \tilde{r}_d}{\sum_{d=1}^{W} (\tilde{r}_d + \tilde{m}_d)}$$
+
+where $W$ is `search_radius`, and $\tilde{r}_d$, $\tilde{m}_d$ are rainfall and
+snowmelt flux on day $d$ set to zero if below a noise floor of 0.1 mm/day. Days
+where both fluxes fall below the noise floor contribute nothing to either the
+numerator or denominator. The resulting metric is bounded on $[0, 1]$ and
+comparable across basins regardless of climatological flux magnitude.
+
+Classification rules are applied in the following order:
+
+1. **Unclassified**: fewer than 90% of `search_radius` days have WLDAS data, or
+   `rain_frac` is undefined (zero total antecedent flux after noise-floor
+   removal).
+2. **Rainfall**: `rain_frac >= RAIN_FRAC_THRESH` (= 0.99). The tolerance below
+   1.0 absorbs floating-point artifacts and trace-melt days just above the 0.1
+   mm/day noise floor.
+3. **Snowmelt**: `rain_frac < MIXED_SPLIT`, where `MIXED_SPLIT` is the
+   population-level median of `rain_frac` over all data-sufficient peaks with
+   `rain_frac < 0.99` (mixed events), pooled across all 206 sites. This value
+   was computed at run time as 0.2979.
+4. **Rain-on-Snow**: `rain_frac >= MIXED_SPLIT` (after ruling out Rainfall).
+
+The Snowmelt and Rain-on-Snow labels are operationally defined: they describe
+position in the rain fraction distribution of mixed events, not direct physical
+process attribution. Snowmelt-labelled peaks have relatively low rain fraction
+within the mixed-event population; Rain-on-Snow-labelled peaks have relatively
+higher rain fraction but still fall below the pure-rainfall threshold.
+
+The rain fraction (2-class) variant is produced in Script 7 as a downstream
+remap: Snowmelt and Rain-on-Snow peaks from the 3-class output are collapsed into
+a single Non-Rainfall class, yielding two types (Rainfall, Non-Rainfall). The
+2-class method provides a structural sensitivity check on whether the
+Snowmelt/Rain-on-Snow split within the mixed-event pool drives meaningful
+differences in upper-tail quantile estimates.
+
+## 4.2 Decision Tree
+
+```{r frac-thresh-flowchart, fig.cap = "Decision tree for the rain fraction (3-class) classification method (Script 6b). RAIN_FRAC_THRESH = 0.99 separates pure-rainfall events from mixed events. MIXED_SPLIT = 0.2979 is the population-level median rain fraction of mixed events across all 206 sites, computed at run time."}
+gv_frac <- grViz("
+digraph frac_thresh {
+
+  graph [layout = dot, rankdir = TB, fontname = 'Helvetica', splines = polyline]
+  node  [fontname = 'Helvetica', fontsize = 13, margin = 0.25]
+  edge  [fontname = 'Helvetica', fontsize = 11]
+
+  input [label = 'POT peak event\n(search_radius-day antecedent window)',
+         shape = rectangle, style = filled, fillcolor = '#f0f0f0',
+         width = 3.5, penwidth = 1.5]
+
+  d1 [label = 'Complete WLDAS window?\nn_days_data >= 0.90 x search_radius',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 4.2, height = 1.8, penwidth = 1.5, fixedsize = true]
+
+  compute [label = 'Compute rain_frac\n(search_radius window, noise floor 0.1 mm/day)',
+           shape = rectangle, style = filled, fillcolor = '#e8f4fd',
+           width = 4.0, penwidth = 1.5]
+
+  d2 [label = 'rain_frac defined?\n(total flux above noise floor > 0)',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 4.2, height = 1.8, penwidth = 1.5, fixedsize = true]
+
+  d3 [label = 'rain_frac >= 0.99?\n(RAIN_FRAC_THRESH)',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 3.5, height = 1.6, penwidth = 1.5, fixedsize = true]
+
+  d4 [label = 'rain_frac < 0.2979?\n(MIXED_SPLIT)',
+      shape = diamond, style = filled, fillcolor = '#fef9c3',
+      width = 3.5, height = 1.6, penwidth = 1.5, fixedsize = true]
+
+  t_unc1 [label = 'Unclassified\n(no WLDAS)',
+           shape = ellipse, style = filled, fillcolor = '#d9d9d9',
+           width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_unc2 [label = 'Unclassified\n(zero flux)',
+           shape = ellipse, style = filled, fillcolor = '#d9d9d9',
+           width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_rain [label = 'Rainfall',
+          shape = ellipse, style = filled, fillcolor = '#b2182b',
+          fontcolor = 'white', width = 2.0, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_snow [label = 'Snowmelt',
+          shape = ellipse, style = filled, fillcolor = '#2166ac',
+          fontcolor = 'white', width = 2.0, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  t_ros  [label = 'Rain-on-Snow',
+          shape = ellipse, style = filled, fillcolor = '#9970ab',
+          fontcolor = 'white', width = 2.2, height = 0.9, penwidth = 1.5, fixedsize = true]
+
+  input   -> d1
+  d1      -> t_unc1   [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d1      -> compute  [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  compute -> d2
+  d2      -> t_unc2   [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d2      -> d3       [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d3      -> t_rain   [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d3      -> d4       [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+  d4      -> t_snow   [taillabel = 'Yes', labelangle = -45, labeldistance = 2.5]
+  d4      -> t_ros    [taillabel = 'No',  labelangle = 45,  labeldistance = 2.5]
+}
+")
+
+png_path_frac <- save_grViz_png(gv_frac, "flowchart_frac_thresh.png", width = 1100)
+knitr::include_graphics(png_path_frac)
+```
+
+```{r fig-frac-space, fig.width = 6.5, fig.height = 4}
+type_colors_frac <- c(
+  "rainfall"     = "#b2182b",
+  "snowmelt"     = "#2166ac",
+  "rain_on_snow" = "#9970ab",
+  "unclassified" = "#cccccc"
+)
+
+RAIN_FRAC_THRESH <- 0.99
+MIXED_SPLIT_VAL  <- attr(peaks_frac, "MIXED_SPLIT")
+if (is.null(MIXED_SPLIT_VAL)) MIXED_SPLIT_VAL <- 0.2979
+
+set.seed(42L)
+plot_frac <- peaks_frac %>%
+  dplyr::filter(!is.na(rain_frac)) %>%
+  dplyr::mutate(flood_type_plot = as.character(flood_type_raw)) %>%
+  dplyr::group_by(flood_type_plot) %>%
+  dplyr::slice_sample(prop = 1) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(flood_type_plot != "unclassified")
+
+ggplot2::ggplot(plot_frac,
+                ggplot2::aes(x = rain_frac, fill = flood_type_plot)) +
+  ggplot2::geom_histogram(binwidth = 0.025, colour = "white", linewidth = 0.2,
+                          boundary = 0) +
+  ggplot2::geom_vline(xintercept = MIXED_SPLIT_VAL,
+                      linetype = "dashed", colour = "#2166ac", linewidth = 0.9) +
+  ggplot2::geom_vline(xintercept = RAIN_FRAC_THRESH,
+                      linetype = "dashed", colour = "#b2182b", linewidth = 0.9) +
+  ggplot2::annotate("text",
+    x = MIXED_SPLIT_VAL + 0.02, y = Inf, vjust = 1.5, hjust = 0,
+    label = sprintf("MIXED_SPLIT\n= %.4f", MIXED_SPLIT_VAL),
+    colour = "#2166ac", size = 3) +
+  ggplot2::annotate("text",
+    x = RAIN_FRAC_THRESH - 0.02, y = Inf, vjust = 1.5, hjust = 1,
+    label = "RAIN_FRAC_THRESH\n= 0.99",
+    colour = "#b2182b", size = 3) +
+  ggplot2::scale_x_continuous(
+    name   = "Antecedent Rainfall Fraction (rain_frac)",
+    limits = c(0, 1), breaks = seq(0, 1, 0.2)
+  ) +
+  ggplot2::scale_y_continuous(name = "Count") +
+  ggplot2::scale_fill_manual(
+    values = type_colors_frac,
+    breaks = c("rainfall", "snowmelt", "rain_on_snow", "unclassified"),
+    labels = c("rainfall"     = "Rainfall",
+               "snowmelt"     = "Snowmelt",
+               "rain_on_snow" = "Rain-on-Snow",
+               "unclassified" = "Unclassified"),
+    name = "Flood Type"
+  ) +
+  ggplot2::theme_bw(base_size = 11) +
+  ggplot2::theme(
+    panel.grid.minor = ggplot2::element_blank(),
+    legend.position  = "right"
+  ) +
+  ggplot2::guides(fill = ggplot2::guide_legend(
+    override.aes = list(colour = NA)
+  ))
+
+ggsave(file.path(fig_dir, "decision_space_frac_thresh.png"), width = 6.5, height = 4, units = "in")
+```
+
+Figure X. Fleet-wide distribution of `rain_frac` across all data-sufficient peak-over-threshold events (206 sites), colored by resulting flood type assignment. The dashed line at `RAIN_FRAC_THRESH = 0.99` separates pure-rainfall events (right) from mixed events. The dashed line at `MIXED_SPLIT = 0.2979` divides mixed events into Snowmelt (left) and Rain-on-Snow (right). The structural bimodality of the distribution — mass concentrated near 0 (melt-dominated) and near 1 (rainfall-dominated) — reflects the climatological separation of spring melt seasons from summer convective seasons at most Colorado sites.
+
+## 4.3 Unclassified Events
+
+Under the rain fraction method, a peak is Unclassified if fewer than 90% of its
+`search_radius`-day antecedent window has WLDAS data, or if `rain_frac` is
+undefined (zero total antecedent flux after noise-floor removal). Coverage
+failures occur primarily at two margins: peaks predating the WLDAS archive and
+rare partial windows at the temporal boundaries of the record. The fleet-wide
+unclassified rate ranges from approximately 15–25% across sites at the median,
+with the majority attributable to temporal coverage failures rather than
+classification ambiguity. The coverage-failure fraction is concentrated at the
+oldest sites with long records extending before the WLDAS archive start and is
+not amenable to improvement through classification logic changes.
+
+\newpage
+
+# 5. Minimum Sample Size Thresholds and Single-Sample Alignment
+
+Following Yu et al. (2022), the FFA pipeline applies two minimum sample size
+thresholds: MIN_TYPE_SAMPLE = 20 (the minimum number of peaks of a given type
+at a given site required to fit a per-type GPD) and MIN_SINGLE_SAMPLE = 25 (the
+minimum number of peaks required to fit a single-population GPD). Sites falling
+below MIN_SINGLE_SAMPLE are excluded from FFA entirely. Types falling below
+MIN_TYPE_SAMPLE at a given site are demoted to Unclassified and excluded from
+the per-type fits; the remaining types contribute to the mixture.
+
+A key methodological decision concerns the ordering of the single-sample pool
+selection relative to the MIN_TYPE_SAMPLE demotion step. The single-sample pool
+consists of the top-$n$ peaks by discharge magnitude — one per water year up to
+MIN_SINGLE_SAMPLE peaks — irrespective of flood type. Yu et al. (2022) describe
+this pool as drawn from the full record before type-level filtering is applied.
+This is the logically correct ordering: the single-sample pool is a superset
+that should not depend on which types survive the MIN_TYPE_SAMPLE filter,
+because its purpose is to represent the overall flood frequency at the site.
+
+\newpage
+
+# 6. FFA Fitting
+
+## Distribution Family
+
+Per-type flood frequency curves are fit using the Generalized Pareto Distribution
+(GPD), following the L-moment estimation procedure of Yu et al. (2022). The
+location parameter $\mu$ is fixed at the site-wide POT threshold (the median
+daily maximum discharge), and the scale ($\sigma$) and shape ($\xi$) parameters
+are estimated via L-moments using the `pargpa` function from the `lmomco` R
+package. L-moment estimation is preferred over maximum likelihood for small
+samples because it is unbiased and computationally robust.
+
+The GP quantile function is:
+
+$$Q(p) = \mu + \frac{\sigma}{\xi}\left[p^{-\xi} - 1\right]$$
+
+where $p$ is the PoT exceedance probability. The PoT recurrence interval is
+$RI = 1/p$, which corresponds to approximately the annual exceedance probability
+when the PoT rate is near one event per year (as in Yu et al. 2022).
+
+As a sensitivity check, the Log-Pearson Type III (LP3) distribution was also
+implemented, fit to the log-transformed peaks via L-moments using the `parpe3`
+function. The LP3 is the U.S. standard for annual peak flood frequency analysis
+(Bulletin 17C) and provides a benchmark for comparison. Results from the LP3
+sensitivity check are available in `ffa_params_lp3.rds` and
+`ffa_quantiles_lp3.rds`.
+
+## Mixture Survival Function
+
+The mixture FFA follows Yu et al. (2022) Equation 3, in which the mixture
+survival function is constructed as one minus the product of the per-type CDFs:
+
+$$S_{\text{mix}}(x) = 1 - \prod_{k \in \mathcal{K}} F_k(x)$$
+
+where $\mathcal{K}$ is the set of flood types with at least MIN_TYPE_SAMPLE
+peaks at the site. The GPD CDF is $F_k(x) = 1 - [1 + \xi_k(x - \mu)/\sigma_k]^{-1/\xi_k}$.
+The mixture recurrence interval at discharge level $x$ is
+$RI_{\text{mix}}(x) = 1 / S_{\text{mix}}(x)$. Mixture quantiles at target return
+periods are obtained by numerically inverting this relationship using `uniroot`.
+
+## Data Sufficiency
+
+Types with fewer than MIN_TYPE_SAMPLE events at a given site are excluded from
+the mixture. Sites with fewer than MIN_SINGLE_SAMPLE total events across all
+types are excluded from FFA entirely. These thresholds are identical to those
+used by Yu et al. (2022) and were chosen to ensure that per-type GPD fits are
+based on enough events to yield meaningful parameter estimates, particularly for
+the shape parameter $\xi$, which governs upper-tail behavior.
+
+\newpage
+
+# 7. Results
+
+## 7.1 Classification Composition
+
+```{r composition-figure, fig.height = 5.5, fig.cap = "Classification composition for the depth threshold and rain fraction (3-class) methods, showing the proportion of peaks assigned to each flood type using the pre-sample-size-filter (flood_type_raw) labels. 'Unclassified' in both methods reflects incomplete WLDAS coverage."}
+
+# Build tidy labels for each method from the classified peaks directly.
+# flood_type_raw captures the threshold-only classification before any
+# sample-size demotion, allowing a like-for-like composition comparison.
+label_dt <- peaks_dt %>%
+  dplyr::mutate(
+    method     = "Depth",
+    type_label = dplyr::case_when(
+      as.character(flood_type_raw) == "rainfall"     ~ "Rainfall",
+      as.character(flood_type_raw) == "snowmelt"     ~ "Snowmelt",
+      as.character(flood_type_raw) == "rain_on_snow" ~ "Rain-on-Snow",
+      TRUE                                           ~ "Unclassified"
+    )
+  ) %>%
+  dplyr::select(method, type_label)
+
+label_frac <- peaks_frac %>%
+  dplyr::mutate(
+    method     = "Rain fraction (3-class)",
+    type_label = dplyr::case_when(
+      as.character(flood_type_raw) == "rainfall"     ~ "Rainfall",
+      as.character(flood_type_raw) == "snowmelt"     ~ "Snowmelt",
+      as.character(flood_type_raw) == "rain_on_snow" ~ "Rain-on-Snow",
+      TRUE                                           ~ "Unclassified"
+    )
+  ) %>%
+  dplyr::select(method, type_label)
+
+comp_data <- dplyr::bind_rows(label_dt, label_frac) %>%
+  dplyr::count(method, type_label) %>%
+  dplyr::group_by(method) %>%
+  dplyr::mutate(
+    pct    = n / sum(n),
+    method = factor(method, levels = c("Depth", "Rain fraction (3-class)"))
+  ) %>%
+  dplyr::ungroup()
+
+comp_colors <- c(
+  "Rainfall"     = "#b2182b",
+  "Snowmelt"     = "#2166ac",
+  "Rain-on-Snow" = "#9970ab",
+  "Unclassified" = "#d9d9d9"
+)
+
+ggplot(comp_data, aes(x = method, y = pct, fill = type_label)) +
+  geom_col(position = "stack", colour = "white", linewidth = 0.3) +
+  scale_fill_manual(values = comp_colors, name = "Flood type") +
+  scale_y_continuous(labels = scales::percent, name = "Fraction of all POT peaks") +
+  scale_x_discrete(name = "Classification method") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right") +
+  labs(
+    title    = "Classification composition by method (pre-sample-size filter)",
+    subtitle = "flood_type_raw labels; all 206 sites"
+  )
+
+ggsave(file.path(fig_dir, "classification_composition.png"), width = 6.5, height = 4, units = "in")
+```
+
+## 7.2 Cross-Method 100-Year Flood Comparison
+
+```{r cross-method-scatter, fig.cap = "Comparison of 100-year mixture GPD flood quantiles between the rain fraction (3-class) and depth threshold methods. Points on or near the 1:1 line indicate agreement between the two classification approaches at a given site. Points are colored by the dominant flood type under the rain fraction (3-class) classification (the type contributing the most peaks to the mixture at each site). Sites with insufficient data for both methods (fewer than MIN_SINGLE_SAMPLE peaks) are excluded."}
+
+q_frac <- ffa_q %>%
+  dplyr::filter(method == "frac_thresh_3class", curve_type == "mixture",
+                return_period == 100) %>%
+  dplyr::select(site_no, dplyr::any_of(c("discharge_cfs", "q", "quantile_cfs",
+                                         "flood_q", "quantile")))
+
+q_dt <- ffa_q %>%
+  dplyr::filter(method == "depth_thresh", curve_type == "mixture",
+                return_period == 100) %>%
+  dplyr::select(site_no, dplyr::any_of(c("discharge_cfs", "q", "quantile_cfs",
+                                         "flood_q", "quantile")))
+
+# Dominant flood type at each site under rain fraction (3-class) method
+dominant_type <- peaks_frac %>%
+  dplyr::filter(as.character(flood_type) != "unclassified") %>%
+  dplyr::count(site_no, flood_type) %>%
+  dplyr::group_by(site_no) %>%
+  dplyr::slice_max(n, n = 1, with_ties = FALSE) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    dominant = dplyr::case_when(
+      as.character(flood_type) == "rainfall"     ~ "Rainfall",
+      as.character(flood_type) == "snowmelt"     ~ "Snowmelt",
+      as.character(flood_type) == "rain_on_snow" ~ "Rain-on-Snow",
+      TRUE                                       ~ "Other"
+    )
+  ) %>%
+  dplyr::select(site_no, dominant)
+
+scatter_data <- dplyr::inner_join(q_frac, q_dt, by = "site_no") %>%
+  dplyr::left_join(dominant_type, by = "site_no")
+
+# Rename the quantile columns regardless of source name
+names(scatter_data)[2] <- "q_frac"
+names(scatter_data)[3] <- "q_dt"
+
+xy_lim <- range(c(scatter_data$q_frac, scatter_data$q_dt), na.rm = TRUE)
+
+ggplot(scatter_data %>% dplyr::filter(!is.na(q_frac), !is.na(q_dt)),
+       aes(x = q_dt, y = q_frac, colour = dominant)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              colour = "grey40", linewidth = 0.8) +
+  geom_point(size = 2.2, alpha = 0.7) +
+  scale_x_continuous(name   = "Depth threshold — 100-yr mixture quantile (cfs)",
+                     labels = scales::comma,
+                     limits = xy_lim) +
+  scale_y_continuous(name   = "Rain fraction (3-class) — 100-yr mixture quantile (cfs)",
+                     labels = scales::comma,
+                     limits = xy_lim) +
+  scale_colour_manual(
+    values = c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac",
+               "Rain-on-Snow" = "#9970ab", "Other" = "grey50"),
+    name   = "Dominant type\n(rain fraction)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right") +
+  labs(
+    title    = "Cross-method 100-year flood comparison: Rain fraction (3-class) vs. Depth threshold",
+    subtitle = "Mixture GPD quantiles; 1:1 line dashed. Sites with MIN_SINGLE_SAMPLE >= 25 peaks only."
+  )
+
+ggsave(file.path(fig_dir, "cross_method_100yr_comparison.png"), width = 6.5, height = 4, units = "in")
+```
+
+## 7.3 Dominant Flood Type by Site (Map)
+
+[FIGURE PLACEHOLDER — Map of dominant flood type by site under the rain fraction
+(3-class) classification. This figure is best generated from the Shiny dashboard
+map tab (`app.R`), which renders per-site dominant type on an interactive base
+map. For the report, export the map panel as a PNG and insert here. Key expected
+spatial pattern: Snowmelt dominates at high-elevation headwater sites in the
+Rocky Mountains; Rainfall predominates at lower-elevation plains and foothill
+sites; Rain-on-Snow is concentrated at mid-elevation sites with persistent
+seasonal snowpacks.]
+
+## 7.4 GPD Shape Parameter Distributions by Flood Type
+
+[FIGURE PLACEHOLDER — GPD shape parameter ($\xi$) distributions by flood type,
+following the style of Yu et al. (2022) Figure 2e. Expected pattern: $\xi > 0$
+(heavy tail) for Rainfall; $\xi < 0$ or near zero (light to bounded tail) for
+Snowmelt; $\xi$ intermediate for Rain-on-Snow. This figure is available from
+`ffa_params_gpd.rds` by filtering to per-type fits and plotting the $\xi$
+column grouped by flood type. Code stub:
+
+```r
+ffa_p %>%
+  dplyr::filter(curve_type != "mixture", !is.na(xi)) %>%
+  ggplot(aes(x = xi, fill = curve_type)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~method) +
+  theme_bw()
+```
+]
+
+\newpage
+
+# 8. Temporal Trend Analysis
+
+Flood hazard in Colorado is shaped by long-term changes in both climate
+forcing and the relative frequency of different flood-generating processes.
+To characterise these changes, two parallel trend analyses are carried out:
+one targeting annual climate forcing variables at each site (Script 8) and
+one targeting the annual frequency and composition of flood types classified
+under the rain fraction scheme (Script 9). Both analyses use the
+Mann-Kendall (MK) non-parametric test for monotonic trend and the Theil-Sen
+slope estimator (median of all pairwise slopes). Tests are conducted at
+$\alpha = 0.05$.
+
+## 8.1 Approach
+
+**Mann-Kendall and Theil-Sen.** The Mann-Kendall test ranks the time series
+without assuming a particular distribution, making it robust to non-normality,
+tied values, and the irregular gaps that arise from gauge record gaps.
+The Theil-Sen slope estimator is correspondingly resistant to outliers because
+it is based on the median rather than the mean of pairwise slopes. Both are
+widely used for hydrological trend detection (e.g.\ Helsel & Hirsch 2002; Yue
+et al.\ 2002).
+
+**Significance threshold.** Under a true null of no trend, exactly 5% of MK
+tests are expected to return $p < 0.05$ by chance. Throughout this section,
+a dashed reference line is drawn at this expected rate to distinguish systematic
+evidence from random inflation of rejections.
+
+**Climate forcing variables** (Script 8). Trends are tested for five annual
+series at each site: total precipitation ($\mathrm{mm}$), peak SWE
+($\mathrm{mm}$), maximum peak discharge ($\mathrm{cfs}$), POT event rate
+(events per year), and median rain fraction of POT events (dimensionless). A
+minimum of 20 non-missing years is required for the MK test to have adequate
+power (Yue et al.\ 2002). Water years with WLDAS day coverage below 90% of
+expected are excluded from precipitation and SWE series before testing to
+avoid bias from incomplete records.
+
+**Flood type frequency variables** (Script 9, rain fraction 3-class). Trends
+are tested separately for each flood type (Rainfall, Snowmelt, Rain-on-Snow)
+in two metrics: annual count (events per year) and annual proportion (fraction
+of all classified peaks). Site eligibility requires $\geq 20$ water years with
+at least one classified peak and $\geq 5$ years with at least one peak of the
+specific type being tested. Both metrics are informative: count trends detect
+absolute changes in occurrence rate, while proportion trends detect composition
+shifts independent of the total peak rate.
+
+## 8.2 Climate Forcing Trends
+
+```{r climate-trend-summary, fig.height=4, fig.width=7}
+MK_ALPHA_REPORT <- 0.05
+
+VAR_LABELS_REPORT <- c(
+  total_precip_mm        = "Total annual\nprecipitation",
+  peak_swe_mm            = "Peak SWE",
+  max_peak_discharge_cfs = "Max peak\ndischarge",
+  pot_event_rate         = "POT event rate",
+  median_rain_frac       = "Median rain\nfraction of POT events"
+)
+
+# Variable order: arrange roughly from precipitation inputs to hydrologic outputs
+VAR_ORDER <- c("total_precip_mm", "peak_swe_mm", "median_rain_frac",
+               "pot_event_rate", "max_peak_discharge_cfs")
+
+clim_sum <- climate_trends %>%
+  dplyr::mutate(
+    significant = !is.na(p_value) & p_value < MK_ALPHA_REPORT,
+    direction   = dplyr::case_when(
+      significant & sen_slope > 0 ~ "Increasing",
+      significant & sen_slope < 0 ~ "Decreasing",
+      TRUE                        ~ "Not significant"
+    )
+  ) %>%
+  dplyr::group_by(variable) %>%
+  dplyr::summarise(
+    n_total = dplyr::n(),
+    n_pos   = sum(direction == "Increasing"),
+    n_neg   = sum(direction == "Decreasing"),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    var_label  = VAR_LABELS_REPORT[variable],
+    var_label  = factor(var_label, levels = VAR_LABELS_REPORT[VAR_ORDER]),
+    null_count = round(0.05 * n_total)
+  )
+
+clim_plot_df <- dplyr::bind_rows(
+  dplyr::transmute(clim_sum, var_label, direction = "Increasing",  n =  n_pos),
+  dplyr::transmute(clim_sum, var_label, direction = "Decreasing",  n = -n_neg)
+)
+
+null_line <- round(0.05 * dplyr::first(clim_sum$n_total))
+
+ggplot2::ggplot(clim_plot_df,
+                ggplot2::aes(x = n, y = var_label, fill = direction)) +
+  ggplot2::geom_col(width = 0.6, alpha = 0.9) +
+  ggplot2::geom_vline(xintercept = c(-null_line, null_line),
+                      linetype = "dashed", colour = "grey35", linewidth = 0.7) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey20", linewidth = 0.4) +
+  ggplot2::scale_fill_manual(
+    values = c("Increasing" = "#b2182b", "Decreasing" = "#2166ac"),
+    name = NULL
+  ) +
+  ggplot2::scale_x_continuous(
+    name   = "Number of sites with significant trend",
+    labels = function(x) abs(x),
+    breaks = c(-40, -30, -20, -10, 0, 10, 20, 30, 40)
+  ) +
+  ggplot2::scale_y_discrete(name = NULL) +
+  ggplot2::labs(
+    title    = "Climate forcing trends across all eligible sites",
+    subtitle = sprintf(
+      "Dashed lines: expected 5%% significant by chance (~%d sites)  |  α = %.2f",
+      null_line, MK_ALPHA_REPORT
+    )
+  ) +
+  ggplot2::theme_bw(base_size = 11) +
+  ggplot2::theme(
+    legend.position  = "bottom",
+    panel.grid.minor = ggplot2::element_blank(),
+    panel.grid.major.y = ggplot2::element_blank()
+  )
+
+ggsave(file.path(fig_dir, "climate_forcing_trends.png"), width = 6.5, height = 4, units = "in")
+
+```
+
+Total precipitation shows the most widespread significant trends, with more
+sites exhibiting decreasing than increasing totals. Peak SWE trends are more
+evenly split, with a modest excess of increasing trends — plausibly reflecting
+recent high-snowpack years within some longer records rather than a sustained
+directional shift. The POT event rate shows exclusively decreasing significant
+trends, consistent with a contraction of flood-generating conditions at some
+sites. Max peak discharge trends are weak and nearly balanced, and median rain
+fraction shows slightly more sites with decreasing than increasing values.
+For all five variables, the fraction of sites with significant trends is small
+relative to the total, and in most cases does not substantially exceed the
+expected false-positive rate — evidence that large-scale, coherent trends in
+Colorado flood climate remain difficult to detect at individual sites across
+the historical record length.
+
+## 8.3 Flood Type Frequency Trends
+
+The following figure shows, for each flood type and metric, the percentage of
+eligible sites with a significant Mann-Kendall trend, split by direction. Only
+the rain fraction (3-class) classification is shown; depth threshold results
+follow the same pattern. Sites with fewer than 20 classified years or fewer
+than 5 years of the specific type are excluded from the eligible pool for that
+type.
+
+```{r fft-trend-summary, fig.height=4, fig.width=7}
+TYPE_LABELS_REPORT <- c(
+  rainfall     = "Rainfall",
+  snowmelt     = "Snowmelt",
+  rain_on_snow = "Rain-on-Snow"
+)
+
+fft_agg <- fft_trends$aggregate %>%
+  dplyr::filter(population == "all_eligible") %>%
+  dplyr::mutate(
+    type_label   = factor(TYPE_LABELS_REPORT[flood_type],
+                          levels = c("Rain-on-Snow", "Snowmelt", "Rainfall")),
+    metric_label = dplyr::recode(metric,
+                                 count      = "Count (events / yr)",
+                                 proportion = "Proportion (fraction / yr)")
+  )
+
+fft_plot_df <- dplyr::bind_rows(
+  dplyr::transmute(fft_agg, type_label, metric_label,
+                   direction = "Increasing", pct =  pct_sig_pos),
+  dplyr::transmute(fft_agg, type_label, metric_label,
+                   direction = "Decreasing", pct = -pct_sig_neg)
+)
+
+x_lim <- 20
+
+ggplot2::ggplot(fft_plot_df,
+                ggplot2::aes(x = pct, y = type_label, fill = direction)) +
+  ggplot2::geom_col(width = 0.6, alpha = 0.9) +
+  ggplot2::geom_vline(xintercept = c(-5, 5),
+                      linetype = "dashed", colour = "grey35", linewidth = 0.7) +
+  ggplot2::geom_vline(xintercept = 0, colour = "grey20", linewidth = 0.4) +
+  ggplot2::scale_fill_manual(
+    values = c("Increasing" = "#b2182b", "Decreasing" = "#2166ac"),
+    name = NULL
+  ) +
+  ggplot2::scale_x_continuous(
+    name   = "Sites with significant trend (% of eligible)",
+    labels = function(x) paste0(abs(x), "%"),
+    limits = c(-x_lim, x_lim)
+  ) +
+  ggplot2::scale_y_discrete(name = NULL) +
+  ggplot2::facet_wrap(~metric_label, ncol = 2) +
+  ggplot2::labs(
+    title    = "Flood type frequency trends — Rain fraction (3-class)",
+    subtitle = sprintf(
+      "Dashed lines: expected 5%% significant by chance  |  α = %.2f",
+      MK_ALPHA_REPORT
+    )
+  ) +
+  ggplot2::theme_bw(base_size = 11) +
+  ggplot2::theme(
+    legend.position    = "bottom",
+    panel.grid.minor   = ggplot2::element_blank(),
+    panel.grid.major.y = ggplot2::element_blank(),
+    strip.background   = ggplot2::element_rect(fill = "grey92", colour = NA)
+  )
+
+ggsave(file.path(fig_dir, "flood_frequency_trends.png"), width = 6.5, height = 4, units = "in")
+```
+
+Across all three flood types and both metrics, the proportion of sites with
+significant trends is broadly consistent with the expected false-positive rate.
+The clearest exception is Snowmelt proportion in the unregulated sub-population,
+where approximately 14% of eligible sites show a significant trend — roughly
+twice the expected rate — with the majority of those being increases. This is
+counterintuitive given broader evidence of declining snowmelt contributions in
+the western US, but may reflect the relatively short period of record at some
+sites, inter-decadal variability, or the operational definition of Snowmelt
+under the rain fraction scheme (below-median rain fraction of mixed events)
+rather than a physically consistent process label. Rainfall proportion shows a
+modest excess of significant trends across both count and proportion metrics,
+with slightly more sites exhibiting decreases than increases, consistent with a
+gradual shift in the balance of event types at some locations.
+
+\newpage
+
+# 9. Limitations and Future Work
+
+**WLDAS spatial resolution.** WLDAS operates at approximately 12.5 km
+grid spacing across CONUS. Colorado's complex mountain terrain features
+elevation gradients of hundreds of meters per kilometer, and basin-averaged
+values at this resolution mask important sub-basin variability in snowmelt
+timing, rainfall intensity, and frozen-soil infiltration capacity. The
+classification is therefore an approximation based on spatially smoothed
+forcing, and threshold values derived from the fleet-wide rain fraction
+distribution reflect patterns in the smoothed rather than the point-scale signal.
+
+**Daily versus instantaneous peak flows.** The analysis uses the maximum daily
+discharge within each POT event, whereas the physical flood peak is
+instantaneous. For small basins with short concentration times, the daily
+maximum may substantially underestimate the true peak. Yu et al. (2022) note
+that the mixture effect — the departure of the mixture quantile curve from a
+single-population fit — is likely stronger at the instantaneous scale, where
+within-type variability is lower and between-type differences more pronounced.
+The daily-aggregated results reported here should therefore be interpreted as a
+conservative estimate of the mixture effect.
+
+**Rain-on-Snow viability.** At sites where fewer than MIN_TYPE_SAMPLE
+rain-on-snow events are identified, the rain-on-snow component is excluded from
+the mixture and its contribution is implicitly absorbed into the remaining types.
+Rain-on-snow viability is lowest at very high elevations (where rainfall in the
+antecedent window is rare) and at very low elevations (where seasonal snowpack is
+absent). Under the rain fraction (3-class) method, 96 sites have sufficient
+rain-on-snow samples and are predominantly at mid to upper-mid elevations. Future
+work could explore whether a relaxed MIN_TYPE_SAMPLE (e.g., 10–15) would
+meaningfully expand the viable rain-on-snow set without destabilizing parameter
+estimates.
+
+**Climate nonstationarity.** The analysis treats all years of record as equally
+representative of current flood hazard. Evidence from the broader literature
+suggests that snowmelt-driven flood magnitudes have declined in the western US
+as temperatures have risen, while extreme rainfall events have increased. The
+fitted distributions therefore represent a mixture of historical conditions
+rather than a stationary representation of current or future hazard. Nonstationary
+FFA methods incorporating climate covariates would be a natural extension.
+
+**Higher-resolution land surface model output.** The Basin Characterization Model
+(BCM) and similar products provide spatially distributed runoff estimates at finer
+resolution than WLDAS. A comparison of WLDAS-based classifications with BCM-based
+classifications at a subset of sites would help characterize the sensitivity of
+the mixture FFA results to the choice of land surface forcing product.
+
+\newpage
+
+# 10. References
+
+Davenport, F. V., Herrera-Estrada, J. E., Burke, M., & Diffenbaugh, N. S.
+(2020). Flood size increases nonlinearly across the western United States in
+response to lower snow-precipitation ratios. *Water Resources Research*, 56(1),
+e2019WR025571. https://doi.org/10.1029/2019WR025571
+
+Hosking, J. R. M., & Wallis, J. R. (1997). *Regional Frequency Analysis: An
+Approach Based on L-Moments*. Cambridge University Press.
+
+Livneh, B., Deems, J. S., Schneider, D., Barsugli, J. J., & Molotch, N. P.
+(2014). Filling in the gaps: Inferring spatially distributed precipitation from
+gauge observations over complex terrain. *Water Resources Research*, 50(11),
+8589–8610. [Used for the peak independence separation criterion
+$\theta = 5 + \ln(1.6092 \cdot A)$.]
+
+Yu, G., Wright, D. B., & Li, Z. (2022). Non-stationary flood frequency analysis
+using a mixture distribution approach: A case study for floods in the western
+United States. *Water Resources Research*, 58(1), e2021WR031134.
+https://doi.org/10.1029/2021WR031134

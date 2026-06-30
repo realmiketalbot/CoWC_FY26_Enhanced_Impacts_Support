@@ -1,0 +1,43 @@
+=== Rainfall Threshold Sensitivity Summary ===
+Peaks in scope    : 6076 (63 sites, unregulated, data-sufficient)
+Threshold range   : 0.70 to 0.99 (step 0.01)
+Current threshold : 0.95
+
+--- Stage 1: Geometry ---
+Peaks with rain_frac >= 0.95 (current): 3446
+Peaks with rain_frac >= 0.70 (min scan): 3888
+Local density minima in threshold zone:
+  0.700 (density = 0.2157)
+  0.761 (density = 0.2612)
+  0.725 (density = 0.2941)
+  0.876 (density = 0.4895)
+  0.897 (density = 0.5269)
+  0.939 (density = 0.6911)
+
+--- Shoulder zone melt contamination (0.80 to 0.95) ---
+Peaks in shoulder zone : 320
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ 0.1040  0.8121  1.6858  2.3965  3.2971 13.1590 
+Fraction with melt_flux_short < 1 mm  : 31.6%
+Fraction with melt_flux_short < 5 mm  : 88.4%
+Fraction with melt_flux_short < 10 mm : 99.1%
+
+--- Stage 2: GPD Sensitivity ---
+# A tibble: 30 × 5
+   threshold n_sites xi_median xi_q25 xi_q75
+       <dbl>   <dbl>     <dbl>  <dbl>  <dbl>
+ 1      0.7       63     -3.24  -18.6 -0.439
+ 2      0.71      63     -3.24  -18.6 -0.259
+ 3      0.72      63     -3.24  -18.6 -0.259
+ 4      0.73      63     -3.24  -18.6 -0.259
+ 5      0.74      63     -3.55  -18.3 -0.259
+ 6      0.75      63     -3.61  -17.1 -0.259
+ 7      0.76      63     -3.77  -17.1 -0.259
+ 8      0.77      63     -3.77  -17.1 -0.259
+ 9      0.78      63     -3.68  -17.1 -0.259
+10      0.79      63     -3.68  -18.4 -0.259
+# ℹ 20 more rows
+# ℹ Use `print(n = ...)` to see more rows
+
+xi_median CV across threshold range: 0.107
+  (CV < 0.10 suggests low sensitivity; CV > 0.25 suggests meaningful variation)

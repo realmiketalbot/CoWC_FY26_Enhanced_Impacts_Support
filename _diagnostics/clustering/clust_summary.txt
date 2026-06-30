@@ -1,0 +1,32 @@
+=== Clustering Diagnostic Summary ===
+Peaks in scope  : 6076 (63 sites, unregulated, data-sufficient)
+Best GMM k      : 5  (model: EVE, BIC = 11329.7)
+
+--- Cluster centroids ---
+     rain_frac ros_flux_frac
+[1,]     0.984         0.003
+[2,]     0.035         0.345
+[3,]     0.906         0.542
+[4,]     0.572         0.752
+[5,]     0.227         0.672
+
+--- Cluster sizes ---
+
+   1    2    3    4    5 
+3432 1227  468  442  507 
+
+--- Uncertainty summary ---
+     Min.   1st Qu.    Median      Mean   3rd Qu.      Max. 
+0.000e+00 3.330e-06 3.330e-06 1.241e-02 2.020e-05 4.951e-01 
+  Peaks with uncertainty > 0.20 : 143 (2.4%)
+  Peaks with uncertainty > 0.40 : 51 (0.8%)
+
+--- GMM vs 5b confusion (counts) ---
+# A tibble: 5 × 5
+  gmm_cluster rainfall unclassified snowmelt   ROS
+  <fct>          <int>        <int>    <int> <int>
+1 1               3132          300        0     0
+2 2                  0          854      123   250
+3 3                165          225        0    78
+4 4                  0          198        0   244
+5 5                  0          223        0   284

@@ -1,0 +1,13 @@
+config,flood_type,n_events,pct_events,viable_sites,viable_sites_post,n_single_sites
+GMM (k=2.0),rainfall,13919,65.6,192,192,194
+GMM (k=2.0),snowmelt,3481,16.4,97,97,NA
+GMM (k=2.0),ROS,134,0.6,5,5,NA
+GMM (k=2.0),unclassified,3677,17.3,0,0,NA
+"Geometric narrow (B1→0.50, B2←0.50)",rainfall,12877,60.7,188,188,194
+"Geometric narrow (B1→0.50, B2←0.50)",snowmelt,3668,17.3,101,101,NA
+"Geometric narrow (B1→0.50, B2←0.50)",ROS,429,2,13,13,NA
+"Geometric narrow (B1→0.50, B2←0.50)",unclassified,4237,20,0,0,NA
+"Geometric wide   (B1→0.25, B2←0.75)",rainfall,11849,55.9,183,183,194
+"Geometric wide   (B1→0.25, B2←0.75)",snowmelt,2575,12.1,80,80,NA
+"Geometric wide   (B1→0.25, B2←0.75)",ROS,2292,10.8,64,64,NA
+"Geometric wide   (B1→0.25, B2←0.75)",unclassified,4495,21.2,0,0,NA

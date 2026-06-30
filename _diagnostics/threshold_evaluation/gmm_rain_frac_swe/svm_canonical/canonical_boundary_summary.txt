@@ -1,0 +1,54 @@
+Canonical GMM + SVM (v4 — end-members excluded a priori)
+2026-05-08 12:26:18 
+
+GMM: G=4, EEV, seed=42, unscaled, n=20644
+Interior: rain_frac in (0.01, 0.99), n=9234
+
+Component summary:
+# A tibble: 4 × 4
+  component     n rain_frac_med log10_swe_med
+      <int> <int>         <dbl>         <dbl>
+1         4  4468        0.0509      2.06    
+2         3  1909        0.315       1.23    
+3         1  1256        0.607       0.435   
+4         2 13011        1           0.000240
+
+Merged class counts (full):
+# A tibble: 3 × 2
+  gmm_class     n
+  <fct>     <int>
+1 snowmelt   4468
+2 ROS        1909
+3 rainfall  14267
+
+Interior class counts:
+# A tibble: 3 × 2
+  gmm_class     n
+  <fct>     <int>
+1 snowmelt   3325
+2 ROS        1730
+3 rainfall   4179
+
+snowmelt vs. ROS (cost=1.000):
+  n_snowmelt=3325, n_ROS=1730, n_sv=724
+  w=(-17.7696, 3.8083), b=1.7787
+  accuracy=0.9834 | snowmelt recall=0.9919 | ROS recall=0.9671
+  log10_swe = 0.4671 + 4.6660 * rain_frac
+  rain_frac = -0.1001 + 0.2143 * log10_swe
+
+ROS vs. rainfall (cost=1.000):
+  n_ROS=1730, n_rainfall=4179, n_sv=623
+  w=(-13.2899, 3.9699), b=-2.0679
+  accuracy=0.9744 | ROS recall=0.9561 | rainfall recall=0.9821
+  log10_swe = -0.5209 + 3.3477 * rain_frac
+  rain_frac = 0.1556 + 0.2987 * log10_swe
+
+Overall agreement (full dataset, sequential tree): 0.7111
+
+Per-class agreement:
+# A tibble: 3 × 4
+  class    n_true precision recall
+  <chr>     <int>     <dbl>  <dbl>
+1 snowmelt   4468    0.954  0.994 
+2 ROS        1909    0.0182 0.0398
+3 rainfall  14267    0.861  0.712 

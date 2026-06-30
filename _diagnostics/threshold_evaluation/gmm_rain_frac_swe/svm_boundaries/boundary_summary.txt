@@ -1,0 +1,25 @@
+Linear SVM boundaries with end-member filter
+2026-05-08 10:51:10 
+
+Full dataset:           6415 peaks
+Interior subset (SVM):  2442 peaks (38.1%)
+End-member filter:      rain_frac in (0.01, 0.99)
+
+Coefficients (current 6b vs. SVM):
+# A tibble: 4 × 4
+  boundary param     current     svm
+  <chr>    <chr>       <dbl>   <dbl>
+1 B1       intercept   0.497  -2.48 
+2 B1       slope       5.34   -0.813
+3 B2       intercept   0.108 -18.8  
+4 B2       slope       0.350  -8.64 
+
+Overall agreement with GMM labels: 0.1796
+
+Per-class agreement:
+# A tibble: 3 × 4
+  class    n_true precision recall
+  <chr>     <int>     <dbl>  <dbl>
+1 snowmelt   1152     0.180      1
+2 ROS         527    NA          0
+3 rainfall   4736    NA          0

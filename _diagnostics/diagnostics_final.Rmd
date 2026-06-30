@@ -1,0 +1,3046 @@
+---
+title: "Flood Classification Diagnostics"
+author: ""
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(colorspace)
+library(lmomco)
+library(patchwork)
+library(DiagrammeR)
+library(DiagrammeRsvg)
+library(rsvg)
+
+# Output directory for saved figures
+fig_dir <- "diagnostics_final"
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+# Suspect event classification
+Note: The concept of a "suspect" event flag was considered during method development — specifically, flagging peak flow events where total antecedent WLDAS modeled forcing was insufficient to reliably characterize the generating process. Two empirical tests were conducted to evaluate whether such a flag was operationalizable: (1) examination of the marginal distribution of total antecedent forcing depth across all POT peaks, and (2) examination of the forcing-response relationship (total antecedent forcing depth vs. observed peak flow expressed as mm/day over basin area). Neither test revealed a natural break or distinct outlier population that would justify a data-driven threshold. The forcing distribution is unimodal and approximately log-normal with no low-forcing cluster, and high runoff ratio events are scattered continuously across the full range of forcing depths rather than concentrated at low forcing values. On this basis, the suspect flag was rejected as an unsupportable imposition of structure not present in the data.
+
+WLDAS coverage is complete across the study period with no incomplete accumulation windows, so no data availability-based exclusions are required either.
+
+For the adaptive pipeline, this means all valid POT peaks receive a rain_frac value and are therefore classifiable — the unclassified category does not exist in the adaptive framework by design. For the fixed (Davenport) pipeline, an unclassified category is retained for events that do not exceed any per-process depth threshold, which is inherent to that classification scheme and consistent with Yu et al. (2022).
+
+```{r suspect-event-classification-1}
+library(tidyverse)
+
+# --- Paths -------------------------------------------------------------------
+proj_root  <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir   <- file.path(proj_root, "_data")
+diag_dir   <- file.path(proj_root, "_diagnostics", "threshold_evaluation")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+# Deduplicate to one row per peak
+adaptive <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE)
+
+# Filter to unregulated sites
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+peaks_unreg <- adaptive %>% filter(site_no %in% unreg_sites)
+
+# --- Partition by data availability -----------------------------------------
+n_total      <- nrow(peaks_unreg)
+n_incomplete <- sum(is.na(peaks_unreg$total_flux_short))
+n_flux_valid <- n_total - n_incomplete
+
+peaks_flux <- peaks_unreg %>%
+  filter(!is.na(total_flux_short))
+
+cat(sprintf(
+  "Unregulated peaks: %d total | %d with valid flux | %d incomplete window (excluded)\n",
+  n_total, n_flux_valid, n_incomplete
+))
+
+cat(sprintf(
+  "Min non-zero flux: %.3f mm | Exact zeros: %d | Below 0.1 mm: %d | Below 0.5 mm: %d\n",
+  min(peaks_flux$total_flux_short[peaks_flux$total_flux_short > 0]),
+  sum(peaks_flux$total_flux_short == 0),
+  sum(peaks_flux$total_flux_short < 0.1),
+  sum(peaks_flux$total_flux_short < 0.5)
+))
+
+# --- Plot: histogram on log scale --------------------------------------------
+p <- ggplot(peaks_flux, aes(x = total_flux_short)) +
+  geom_histogram(bins = 60, fill = "steelblue", alpha = 0.5,
+                 color = "steelblue4", linewidth = 0.3) +
+  geom_rug(alpha = 0.08, length = unit(0.02, "npc")) +
+  scale_x_log10(
+    breaks = c(0.1, 0.5, 1, 5, 10, 50, 100, 500),
+    labels = c("0.1", "0.5", "1", "5", "10", "50", "100", "500")
+  ) +
+  annotation_logticks(sides = "b") +
+  labs(
+    x     = "Total antecedent forcing depth (rain + melt, mm)",
+    y     = "Count",
+    title = "Distribution of total antecedent WLDAS forcing across POT peaks",
+    subtitle = sprintf(
+      "Unregulated sites (n = %d sites, %d peaks with valid flux; %d incomplete windows excluded)",
+      n_distinct(peaks_flux$site_no), n_flux_valid, n_incomplete
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.subtitle    = element_text(size = 9, color = "grey40")
+  )
+
+ggsave(
+  file.path(diag_dir, "total_flux_distribution.png"),
+  plot = p, width = 7, height = 4.5, dpi = 150
+)
+
+p
+```
+
+```{r suspect-event-classification-2}
+library(tidyverse)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+# Deduplicate to one row per peak
+adaptive <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE)
+
+# Filter to unregulated sites and join drainage area
+peaks <- adaptive %>%
+  filter(site_no %in% (meta %>% filter(!regulated) %>% pull(site_no))) %>%
+  left_join(meta %>% select(site_no, drain_sqkm), by = "site_no")
+
+# Compute q_mm_day: peak_flow (cfs) -> mm/day over basin area
+peaks <- peaks %>%
+  mutate(q_mm_day = peak_flow * 86400 * 0.0283168 / (drain_sqkm * 1e3))
+
+# Retain only peaks with valid flux and valid q_mm_day
+peaks_plot <- peaks %>%
+  filter(!is.na(total_flux_short), !is.na(q_mm_day), q_mm_day > 0)
+
+# --- Plot --------------------------------------------------------------------
+p <- ggplot(peaks_plot, aes(x = total_flux_short, y = q_mm_day)) +
+  geom_point(alpha = 0.25, size = 0.8, color = "steelblue4") +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", color = "grey30", linewidth = 0.5) +
+  scale_x_log10(
+    breaks = c(0.1, 0.5, 1, 5, 10, 50, 100, 500),
+    labels = c("0.1", "0.5", "1", "5", "10", "50", "100", "500")
+  ) +
+  scale_y_log10(
+    breaks = c(0.01, 0.1, 1, 10, 100),
+    labels = c("0.01", "0.1", "1", "10", "100")
+  ) +
+  annotation_logticks(sides = "bl") +
+  labs(
+    x        = "Total antecedent forcing depth (rain + melt, mm)",
+    y        = "Observed peak flow (mm/day)",
+    title    = "Forcing-response relationship across POT peaks",
+    subtitle = sprintf(
+      "Unregulated sites (n = %d sites, %d peaks); dashed line = 1:1",
+      n_distinct(peaks_plot$site_no), nrow(peaks_plot)
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.subtitle    = element_text(size = 9, color = "grey40")
+  )
+
+ggsave(
+  file.path(diag_dir, "forcing_response_scatter.png"),
+  plot = p, width = 7.5, height = 5.5, dpi = 150
+)
+
+p
+```
+
+# Predictor and response distributions
+
+Note: The goal of this section is to characterize the empirical distributions of the key classification inputs and the flood response variable before any thresholds are applied. This provides the observational foundation for both threshold evaluations and allows the reader to understand the structure of the data — including bimodality, skewness, and cross-variable relationships — that motivates the methodological choices that follow. All distributions should be computed on the full pre-classification peak record (excluding suspect events once the suspect threshold is determined).
+
+## Marginal distributions
+
+```{r marginal-distributions}
+library(tidyverse)
+library(patchwork)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+# Davenport et al. (2020) fixed depth thresholds (mm, 8-day window)
+DAVENPORT_RAIN_LOW  <-  5
+DAVENPORT_RAIN_HIGH <- 10
+DAVENPORT_MELT_LOW  <-  5
+DAVENPORT_MELT_HIGH <- 10
+
+# Current adaptive fraction thresholds
+SNOW_EM_THRESH <- 0.10
+RAIN_EM_THRESH <- 0.95
+
+# --- Load and prepare data ---------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% (meta %>% filter(!regulated) %>% pull(site_no))) %>%
+  left_join(meta %>% select(site_no, drain_sqkm), by = "site_no") %>%
+  mutate(q_mm_day = peak_flow * 86400 * 0.0283168 / (drain_sqkm * 1e3))
+
+n_sites <- n_distinct(peaks$site_no)
+n_peaks <- nrow(peaks)
+
+# Peaks with valid flux (non-NA rain_flux_short / melt_flux_short)
+peaks_flux <- peaks %>% filter(!is.na(rain_flux_short), !is.na(melt_flux_short))
+peaks_frac <- peaks %>% filter(!is.na(rain_frac))
+peaks_q    <- peaks %>% filter(!is.na(q_mm_day), q_mm_day > 0)
+
+# --- Shared theme ------------------------------------------------------------
+diag_theme <- theme_bw(base_size = 11) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(size = 10, face = "bold"),
+    axis.title       = element_text(size = 9),
+    axis.text        = element_text(size = 8)
+  )
+
+# --- Panel 1: Antecedent rainfall depth --------------------------------------
+p1 <- ggplot(peaks_flux, aes(x = pmax(rain_flux_short, 0.05))) +
+  geom_histogram(bins = 60, fill = "#E07B39", alpha = 0.5,
+                 color = "#C05A1F", linewidth = 0.2) +
+  geom_rug(alpha = 0.06, length = unit(0.02, "npc"), color = "#C05A1F") +
+  geom_vline(xintercept = DAVENPORT_RAIN_LOW,  linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  geom_vline(xintercept = DAVENPORT_RAIN_HIGH, linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  annotate("text", x = DAVENPORT_RAIN_LOW,  y = Inf,
+           label = "Dav. low\n(5 mm)",  hjust = 1.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  annotate("text", x = DAVENPORT_RAIN_HIGH, y = Inf,
+           label = "Dav. high\n(10 mm)", hjust = -0.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  scale_x_log10(
+    breaks = c(0.1, 0.5, 1, 5, 10, 50, 100, 500),
+    labels = c("0.1", "0.5", "1", "5", "10", "50", "100", "500")
+  ) +
+  coord_cartesian(ylim = c(0, 300)) +
+  annotation_logticks(sides = "b") +
+  labs(
+    title = "Panel 1 — Antecedent rainfall depth",
+    x     = "Rainfall depth (mm, adaptive window)",
+    y     = "Count"
+  ) +
+  diag_theme
+
+# --- Panel 2: Antecedent snowmelt depth --------------------------------------
+p2 <- ggplot(peaks_flux, aes(x = pmax(melt_flux_short, 0.05))) +
+  geom_histogram(bins = 60, fill = "#5B8DB8", alpha = 0.5,
+                 color = "#3A6A9A", linewidth = 0.2) +
+  geom_rug(alpha = 0.06, length = unit(0.02, "npc"), color = "#3A6A9A") +
+  geom_vline(xintercept = DAVENPORT_MELT_LOW,  linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  geom_vline(xintercept = DAVENPORT_MELT_HIGH, linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  annotate("text", x = DAVENPORT_MELT_LOW,  y = Inf,
+           label = "Dav. low\n(5 mm)",  hjust = 1.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  annotate("text", x = DAVENPORT_MELT_HIGH, y = Inf,
+           label = "Dav. high\n(10 mm)", hjust = -0.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  scale_x_log10(
+    breaks = c(0.1, 0.5, 1, 5, 10, 50, 100, 500),
+    labels = c("0.1", "0.5", "1", "5", "10", "50", "100", "500")
+  ) +
+  coord_cartesian(ylim = c(0, 100)) +
+  annotation_logticks(sides = "b") +
+  labs(
+    title = "Panel 2 — Antecedent snowmelt depth",
+    x     = "Snowmelt depth (mm, adaptive window)",
+    y     = "Count"
+  ) +
+  diag_theme
+
+# --- Panel 3: Rain fraction --------------------------------------------------
+p3 <- ggplot(peaks_frac, aes(x = rain_frac)) +
+  geom_histogram(bins = 60, fill = "#6A9E6F", alpha = 0.5,
+                 color = "#4A7E4F", linewidth = 0.2) +
+  geom_rug(alpha = 0.06, length = unit(0.02, "npc"), color = "#4A7E4F") +
+  geom_vline(xintercept = SNOW_EM_THRESH, linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  geom_vline(xintercept = RAIN_EM_THRESH, linetype = "dashed",
+             color = "grey20", linewidth = 0.5) +
+  annotate("text", x = SNOW_EM_THRESH, y = Inf,
+           label = "Snow\n(0.10)", hjust = 1.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  annotate("text", x = RAIN_EM_THRESH, y = Inf,
+           label = "Rain\n(0.95)", hjust = -0.1, vjust = 1.3,
+           size = 2.8, color = "grey20") +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  coord_cartesian(ylim = c(0, 300)) +
+  labs(
+    title = "Panel 3 — Antecedent rain fraction",
+    x     = "Rain fraction (adaptive window)",
+    y     = "Count"
+  ) +
+  diag_theme
+
+# --- Panel 4: Observed peak flow (mm/day) ------------------------------------
+p4 <- ggplot(peaks_q, aes(x = q_mm_day)) +
+  geom_histogram(bins = 60, fill = "grey50", alpha = 0.5,
+                 color = "grey30", linewidth = 0.2) +
+  geom_rug(alpha = 0.06, length = unit(0.02, "npc"), color = "grey30") +
+  scale_x_log10(
+    breaks = c(0.01, 0.1, 1, 10, 100),
+    labels = c("0.01", "0.1", "1", "10", "100")
+  ) +
+  annotation_logticks(sides = "b") +
+  labs(
+    title = "Panel 4 — Observed peak flow rate",
+    x     = "Peak flow (mm/day)",
+    y     = "Count"
+  ) +
+  diag_theme
+
+# --- Combine with patchwork --------------------------------------------------
+fig <- (p1 + p2) / (p3 + p4) +
+  plot_annotation(
+    title    = "Marginal distributions of classification predictors and flood response",
+    subtitle = sprintf(
+      "Unregulated sites (n = %d sites, %d peaks); Davenport thresholds over adaptive window for reference only",
+      n_sites, n_peaks
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "grey40")
+    )
+  )
+
+ggsave(
+  file.path(diag_dir, "marginal_distributions.png"),
+  plot = fig, width = 10, height = 7, dpi = 150
+)
+
+fig
+```
+
+## Joint distributions
+```{r joint-distributions-1}
+library(tidyverse)
+library(patchwork)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+DAVENPORT_RAIN_LOW  <-  5
+DAVENPORT_RAIN_HIGH <- 10
+DAVENPORT_MELT_LOW  <-  5
+DAVENPORT_MELT_HIGH <- 10
+SNOW_EM_THRESH      <- 0.10
+RAIN_EM_THRESH      <- 0.95
+LOG_FLOOR           <- 0.05   # plotting floor for log axes (mm); no methodological meaning
+
+# --- Load and prepare data ---------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% (meta %>% filter(!regulated) %>% pull(site_no))) %>%
+  left_join(meta %>% select(site_no, drain_sqkm), by = "site_no") %>%
+  mutate(q_mm_day = peak_flow * 86400 * 0.0283168 / (drain_sqkm * 1e3))
+
+# Report zero counts before applying log floor
+cat(sprintf(
+  "rain_flux_short exact zeros : %d\n",
+  sum(peaks$rain_flux_short == 0, na.rm = TRUE)
+))
+cat(sprintf(
+  "melt_flux_short exact zeros : %d\n",
+  sum(peaks$melt_flux_short == 0, na.rm = TRUE)
+))
+
+n_sites <- n_distinct(peaks$site_no)
+n_peaks <- nrow(peaks)
+
+# Apply log floor for depth variables
+peaks <- peaks %>%
+  mutate(
+    rain_depth_plot = pmax(rain_flux_short, LOG_FLOOR),
+    melt_depth_plot = pmax(melt_flux_short, LOG_FLOOR),
+    q_mm_day_plot   = pmax(q_mm_day,        LOG_FLOOR)
+  )
+
+# --- Shared theme ------------------------------------------------------------
+pt_alpha <- 0.20
+pt_size  <- 0.7
+pt_color <- "steelblue4"
+
+log_breaks_depth <- c(0.1, 0.5, 1, 5, 10, 50, 100, 500)
+log_labels_depth <- as.character(log_breaks_depth)
+log_breaks_q     <- c(0.01, 0.1, 1, 10, 100)
+log_labels_q     <- as.character(log_breaks_q)
+
+diag_theme <- theme_bw(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(size = 9, face = "bold"),
+    axis.title       = element_text(size = 8),
+    axis.text        = element_text(size = 7)
+  )
+
+ref_vline <- function(xint) {
+  geom_vline(xintercept = xint, linetype = "dashed",
+             color = "grey30", linewidth = 0.45)
+}
+ref_hline <- function(yint) {
+  geom_hline(yintercept = yint, linetype = "dashed",
+             color = "grey30", linewidth = 0.45)
+}
+ref_label_v <- function(xint, lab, hjust = 1.1) {
+  annotate("text", x = xint, y = Inf, label = lab,
+           hjust = hjust, vjust = 1.3, size = 2.4, color = "grey30")
+}
+ref_label_h <- function(yint, lab, vjust = -0.3) {
+  annotate("text", x = Inf, y = yint, label = lab,
+           hjust = 1.1, vjust = vjust, size = 2.4, color = "grey30")
+}
+
+# --- Panel 1: Rainfall depth vs. snowmelt depth ------------------------------
+p1_data <- peaks %>% filter(!is.na(rain_depth_plot), !is.na(melt_depth_plot))
+
+p1 <- ggplot(p1_data, aes(x = rain_depth_plot, y = melt_depth_plot)) +
+  geom_point(alpha = pt_alpha, size = pt_size, color = pt_color) +
+  ref_vline(DAVENPORT_RAIN_LOW)  + ref_label_v(DAVENPORT_RAIN_LOW,  "R=5")  +
+  ref_vline(DAVENPORT_RAIN_HIGH) + ref_label_v(DAVENPORT_RAIN_HIGH, "R=10", hjust = -0.1) +
+  ref_hline(DAVENPORT_MELT_LOW)  + ref_label_h(DAVENPORT_MELT_LOW,  "M=5")  +
+  ref_hline(DAVENPORT_MELT_HIGH) + ref_label_h(DAVENPORT_MELT_HIGH, "M=10", vjust = 1.3) +
+  scale_x_log10(breaks = log_breaks_depth, labels = log_labels_depth) +
+  scale_y_log10(breaks = log_breaks_depth, labels = log_labels_depth) +
+  annotation_logticks(sides = "bl") +
+  labs(
+    title = "1 — Rainfall depth vs. snowmelt depth",
+    x     = "Rainfall depth (mm)",
+    y     = "Snowmelt depth (mm)"
+  ) +
+  diag_theme
+
+# --- Panel 2: Rain fraction vs. antecedent SWE -------------------------------
+p2_data <- peaks %>%
+  filter(!is.na(rain_frac), !is.na(swe_mean_mm), swe_mean_mm > 0)
+
+p2 <- ggplot(p2_data, aes(x = rain_frac, y = swe_mean_mm)) +
+  geom_point(alpha = pt_alpha, size = pt_size, color = pt_color) +
+  ref_vline(SNOW_EM_THRESH) + ref_label_v(SNOW_EM_THRESH, "0.10") +
+  ref_vline(RAIN_EM_THRESH) + ref_label_v(RAIN_EM_THRESH, "0.95", hjust = -0.1) +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  scale_y_log10() +
+  annotation_logticks(sides = "l") +
+  labs(
+    title = "2 — Rain fraction vs. antecedent SWE",
+    x     = "Rain fraction",
+    y     = "Mean antecedent SWE (mm)"
+  ) +
+  diag_theme
+
+# --- Panel 3: Rain fraction vs. peak flow ------------------------------------
+p3_data <- peaks %>% filter(!is.na(rain_frac), !is.na(q_mm_day_plot))
+
+p3 <- ggplot(p3_data, aes(x = rain_frac, y = q_mm_day_plot)) +
+  geom_point(alpha = pt_alpha, size = pt_size, color = pt_color) +
+  ref_vline(SNOW_EM_THRESH) + ref_label_v(SNOW_EM_THRESH, "0.10") +
+  ref_vline(RAIN_EM_THRESH) + ref_label_v(RAIN_EM_THRESH, "0.95", hjust = -0.1) +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  scale_y_log10(breaks = log_breaks_q, labels = log_labels_q) +
+  annotation_logticks(sides = "l") +
+  labs(
+    title = "3 — Rain fraction vs. peak flow",
+    x     = "Rain fraction",
+    y     = "Peak flow (mm/day)"
+  ) +
+  diag_theme
+
+# --- Panel 4: Rainfall depth vs. rain fraction -------------------------------
+p4_data <- peaks %>% filter(!is.na(rain_depth_plot), !is.na(rain_frac))
+
+p4 <- ggplot(p4_data, aes(x = rain_depth_plot, y = rain_frac)) +
+  geom_point(alpha = pt_alpha, size = pt_size, color = pt_color) +
+  ref_vline(DAVENPORT_RAIN_LOW)  + ref_label_v(DAVENPORT_RAIN_LOW,  "R=5")  +
+  ref_vline(DAVENPORT_RAIN_HIGH) + ref_label_v(DAVENPORT_RAIN_HIGH, "R=10", hjust = -0.1) +
+  ref_hline(SNOW_EM_THRESH) + ref_label_h(SNOW_EM_THRESH, "0.10") +
+  ref_hline(RAIN_EM_THRESH) + ref_label_h(RAIN_EM_THRESH, "0.95", vjust = 1.3) +
+  scale_x_log10(breaks = log_breaks_depth, labels = log_labels_depth) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  annotation_logticks(sides = "b") +
+  labs(
+    title = "4 — Rainfall depth vs. rain fraction",
+    x     = "Rainfall depth (mm)",
+    y     = "Rain fraction"
+  ) +
+  diag_theme
+
+# --- Panel 5: Snowmelt depth vs. rain fraction -------------------------------
+p5_data <- peaks %>% filter(!is.na(melt_depth_plot), !is.na(rain_frac))
+
+p5 <- ggplot(p5_data, aes(x = melt_depth_plot, y = rain_frac)) +
+  geom_point(alpha = pt_alpha, size = pt_size, color = pt_color) +
+  ref_vline(DAVENPORT_MELT_LOW)  + ref_label_v(DAVENPORT_MELT_LOW,  "M=5")  +
+  ref_vline(DAVENPORT_MELT_HIGH) + ref_label_v(DAVENPORT_MELT_HIGH, "M=10", hjust = -0.1) +
+  ref_hline(SNOW_EM_THRESH) + ref_label_h(SNOW_EM_THRESH, "0.10") +
+  ref_hline(RAIN_EM_THRESH) + ref_label_h(RAIN_EM_THRESH, "0.95", vjust = 1.3) +
+  scale_x_log10(breaks = log_breaks_depth, labels = log_labels_depth) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  annotation_logticks(sides = "b") +
+  labs(
+    title = "5 — Snowmelt depth vs. rain fraction",
+    x     = "Snowmelt depth (mm)",
+    y     = "Rain fraction"
+  ) +
+  diag_theme
+
+# --- Combine -----------------------------------------------------------------
+fig <- (p1 + p2 + p3) / (p4 + p5 + plot_spacer()) +
+  plot_annotation(
+    title    = "Joint distributions of classification predictors and flood response",
+    subtitle = sprintf(
+      "Unregulated sites (n = %d sites, %d peaks); Davenport thresholds shown for reference only",
+      n_sites, n_peaks
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "grey40")
+    )
+  )
+
+ggsave(
+  file.path(diag_dir, "joint_distributions.png"),
+  plot = fig, width = 12, height = 8, dpi = 150
+)
+
+fig
+```
+
+
+# Depth threshold evaluation
+Here's a summary of what was tried and why each approach was abandoned. The chunks refer to since-deleted diagnostic code:
+* Strategy 1 — Weighted inter-class separation metric (chunk 1). A 50×50 grid search over rainfall and snowmelt depth thresholds (0.5–25mm), maximizing the mean absolute difference in per-site median streamflow (mm/day) between rainfall- and snowmelt-classified events, with a sqrt(n/n_max) penalty for thresholds that produced few eligible sites. The objective was reasonable but the metric is essentially asking whether the depth thresholds produce hydrologically meaningful class separation. It found an optimum but there's no guarantee the optimum is stable, interpretable, or that it generalizes across site types. The Davenport reference points performed comparably, undermining the case for optimization.
+* Strategy 2 — Minimize unclassified fraction subject to a separation floor (chunk 2). Reframed the problem as a coverage-vs-purity tradeoff: find the threshold combination that leaves the fewest events unclassified, conditional on inter-class separation remaining above 25%, 50%, or 75% of its grid maximum. This is a more defensible framing but still anchored to the same separation metric, with the same weakness. It also introduced a reference to target_k and boundary variables (bnd_lines, B2_INTERCEPT_BASE, etc.) that are undefined in chunk 2 but appear in chunk 3, suggesting the chunks were developed in an overlapping or nonlinear order.
+* Strategy 3 — Count calibration to adaptive classification (chunk 3). Fixed the rainfall threshold at 1.0mm (derived from agreement maximization with the adaptive GMM classification) and searched for a snowmelt threshold M that minimized Euclidean distance between depth-classified counts and adaptive-classified counts in snowmelt × ROS space. This is explicitly not a process-based criterion — it's trying to make the depth scheme mimic the adaptive scheme's marginal distributions, which is circular if the goal is an independent fixed-threshold alternative. The script references target_k, bnd_lines, and peaks_target that are undefined within the chunk, so it also appears to have been written in conjunction with chunk 4.
+* Strategy 4 — GMM boundary adjustment in rain_frac × SWE space (chunk 4). Shifted the B2 boundary (the ROS/rainfall dividing line in rain_frac vs. log10(SWE+1) space) by a scaling factor k to recover more sites with ≥20 ROS events, targeting the minimum k satisfying both ROS and snowmelt viability. This moves away from depth thresholds entirely and back into the adaptive predictor space, essentially acknowledging that depth thresholds can't recover the ROS class at adequate sample sizes.
+
+Net conclusion: None of these approaches produced a fixed threshold scheme that is simultaneously: (a) process-motivated rather than circular, (b) capable of recovering ROS as a viable class at enough sites, and (c) clearly superior to or meaningfully different from Davenport's original thresholds. The predictor-space (rain_frac) adaptive scheme already does the classification well; the problem was justifying the thresholds within that scheme, not finding a depth-based alternative.
+
+Proposed path forward — GPD sensitivity as the optimization criterion
+The core idea is right: rather than optimizing thresholds against a predictor-space or count-matching criterion, evaluate the thresholds against how well the resulting GPD fits behave statistically at the population level. This is more directly connected to the FFA objective and avoids the circularity problem.
+
+```{r depth-threshold-optimization-test}
+# =============================================================================
+# Depth Threshold Optimization — GPD Mixture vs. Single-Sample Q100
+#
+# Objective: find the (rain_thresh, snow_thresh) pair that maximizes the
+# mean across eligible sites of:
+#
+#   Q_mixture(RI=100) - Q_singlesample(RI=100)
+#
+# where both are GPD-based fits using the existing functions.R machinery.
+#
+# Classification rule (depth decision tree):
+#   rainfall  : rain_depth >= rain_thresh  AND  melt_depth <  snow_thresh
+#   snowmelt  : melt_depth >= snow_thresh  AND  rain_depth <  rain_thresh
+#   ROS       : rain_depth >= rain_thresh  AND  melt_depth >= snow_thresh
+#   (unclassified = below both thresholds; excluded from fitting)
+#
+# Eligibility: unregulated sites where at least TWO flood types each have
+# >= MIN_TYPE_SAMPLE events after classification. Sites with only one
+# qualifying type are excluded (no genuine mixture possible).
+#
+# Single-sample GPD: fit to all classified (non-unclassified) peaks at site.
+#
+# Grid: rain_thresh and snow_thresh each from 1 to 25 mm, step 1 mm (625
+# combinations).
+#
+# Reference points: Davenport et al. (2020) low (5/5) and high (10/10).
+#
+# Outputs saved to: _diagnostics/threshold_evaluation/depth_thresholds/gpd_objective/
+# =============================================================================
+
+library(tidyverse)
+library(lmomco)
+library(patchwork)
+
+# Pin namespace collisions (mclust, MASS may be loaded in session)
+map     <- purrr::map
+map_dfr <- purrr::map_dfr
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation",
+                       "depth_thresholds", "gpd_objective")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+source(file.path(proj_root, "functions.R"))
+
+# --- Constants ---------------------------------------------------------------
+MIN_TYPE_SAMPLE     <- 20L
+TARGET_RI           <- 100       # single return period for now
+DAVENPORT_LOW       <- 5.0
+DAVENPORT_HIGH      <- 10.0
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+
+# One row per peak; retain depth fluxes and pot threshold
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% unreg_sites) %>%
+  filter(!is.na(rain_flux_short), !is.na(melt_flux_short),
+         !is.na(peak_flow), !is.na(peak_date),
+         !is.na(pot_threshold_cfs)) %>%
+  mutate(peak_date = as.Date(peak_date)) %>%
+  rename(rain_depth = rain_flux_short,
+         melt_depth = melt_flux_short) %>%
+  dplyr::select(site_no, peak_id, peak_date, peak_flow,
+                pot_threshold_cfs, rain_depth, melt_depth)
+
+cat(sprintf("Peaks loaded: %d across %d unregulated sites\n",
+            nrow(peaks), n_distinct(peaks$site_no)))
+
+peaks_by_site <- split(peaks, peaks$site_no)
+
+# --- Helper: invert mixture SF at a single RI --------------------------------
+# Scalar version of mixture_curve() — avoids overhead of building full curve.
+mixture_quantile_at_ri <- function(fits, ri) {
+  target <- 1 / ri
+  lb     <- min(sapply(fits, function(f) f$mu), na.rm = TRUE)
+
+  # Build upper bound by doubling until mixture_sf drops below target
+  ub <- max(sapply(fits, function(f) gpd_quantile(target, f)), na.rm = TRUE) * 2
+  ub <- max(ub, lb + 1)
+  for (i in seq_len(40)) {
+    if (isTRUE(mixture_sf(ub, fits) < target)) break
+    ub <- ub * 2
+  }
+
+  f_lb <- mixture_sf(lb, fits) - target
+  f_ub <- mixture_sf(ub, fits) - target
+  if (is.na(f_lb) || is.na(f_ub) || sign(f_lb) == sign(f_ub)) return(NA_real_)
+
+  tryCatch(
+    uniroot(function(x) mixture_sf(x, fits) - target,
+            lower = lb, upper = ub, tol = 0.1)$root,
+    error = function(e) NA_real_
+  )
+}
+
+# --- Core evaluation function ------------------------------------------------
+evaluate_thresholds <- function(rain_thresh, snow_thresh) {
+
+  site_results <- purrr::map_dfr(peaks_by_site, function(sp) {
+    mu <- sp$pot_threshold_cfs[1]
+
+    # Classify
+    sp <- sp %>%
+      mutate(depth_class = case_when(
+        rain_depth >= rain_thresh & melt_depth <  snow_thresh ~ "rainfall",
+        melt_depth >= snow_thresh & rain_depth <  rain_thresh ~ "snowmelt",
+        rain_depth >= rain_thresh & melt_depth >= snow_thresh ~ "ROS",
+        TRUE                                                  ~ "unclassified"
+      ))
+
+    # Count by type
+    type_counts <- sp %>%
+      filter(depth_class != "unclassified") %>%
+      dplyr::count(depth_class)
+
+    # Require at least two types with MIN_TYPE_SAMPLE
+    eligible_types <- type_counts %>%
+      filter(n >= MIN_TYPE_SAMPLE) %>%
+      pull(depth_class)
+
+    if (length(eligible_types) < 2) return(NULL)
+
+    # Fit per-type GPDs
+    type_fits <- purrr::map(eligible_types, function(tp) {
+      sub <- sp %>% filter(depth_class == tp)
+      fit_gpd(sub$peak_flow, sub$peak_date, mu_threshold = mu,
+              min_n = MIN_TYPE_SAMPLE)
+    })
+    names(type_fits) <- eligible_types
+
+    # Drop any NULL fits (degenerate L-moments)
+    type_fits <- Filter(Negate(is.null), type_fits)
+    if (length(type_fits) < 2) return(NULL)
+
+    # Single-sample GPD: all classified (non-unclassified) peaks
+    all_classified <- sp %>% filter(depth_class != "unclassified")
+    ss_fit <- fit_gpd(all_classified$peak_flow, all_classified$peak_date,
+                      mu_threshold = mu, min_n = MIN_TYPE_SAMPLE)
+    if (is.null(ss_fit)) return(NULL)
+
+    # Q100: mixture and single-sample
+    q_mix <- mixture_quantile_at_ri(type_fits, TARGET_RI)
+    q_ss  <- gpd_quantile(1 / TARGET_RI, ss_fit)
+
+    if (is.na(q_mix) || is.na(q_ss) || q_ss <= 0) return(NULL)
+
+    tibble(
+      site_no        = sp$site_no[1],
+      n_types        = length(type_fits),
+      q_mixture      = q_mix,
+      q_singlesample = q_ss,
+      delta_q        = q_mix - q_ss
+    )
+  })
+
+  if (nrow(site_results) == 0) {
+    return(tibble(
+      mean_delta_q   = NA_real_,
+      median_delta_q = NA_real_,
+      n_eligible     = 0L
+    ))
+  }
+
+  tibble(
+    mean_delta_q   = mean(site_results$delta_q,   na.rm = TRUE),
+    median_delta_q = median(site_results$delta_q, na.rm = TRUE),
+    n_eligible     = nrow(site_results)
+  )
+}
+
+# --- Grid search -------------------------------------------------------------
+thresh_seq <- seq(1, 25, by = 1)
+grid       <- expand.grid(rain_thresh = thresh_seq, snow_thresh = thresh_seq)
+
+cat(sprintf("Grid size: %d combinations\n", nrow(grid)))
+cat("Running grid search (this may take a few minutes)...\n")
+
+t0 <- proc.time()
+
+results <- purrr::map2_dfr(
+  grid$rain_thresh,
+  grid$snow_thresh,
+  function(r, s) {
+    res <- evaluate_thresholds(r, s)
+    res %>% mutate(rain_thresh = r, snow_thresh = s)
+  }
+) %>%
+  dplyr::select(rain_thresh, snow_thresh,
+                mean_delta_q, median_delta_q, n_eligible)
+
+elapsed <- proc.time() - t0
+cat(sprintf("Grid search complete: %.1f seconds\n", elapsed["elapsed"]))
+
+# --- Report ------------------------------------------------------------------
+opt_mean <- results %>%
+  filter(!is.na(mean_delta_q)) %>%
+  slice_max(mean_delta_q, n = 1, with_ties = FALSE)
+
+opt_median <- results %>%
+  filter(!is.na(median_delta_q)) %>%
+  slice_max(median_delta_q, n = 1, with_ties = FALSE)
+
+cat(sprintf(
+  "\nOptimal (mean delta Q100):\n  Rain: %g mm | Snow: %g mm\n  Mean delta: %.2f cfs | Eligible sites: %d\n",
+  opt_mean$rain_thresh, opt_mean$snow_thresh,
+  opt_mean$mean_delta_q, opt_mean$n_eligible
+))
+
+cat(sprintf(
+  "\nOptimal (median delta Q100):\n  Rain: %g mm | Snow: %g mm\n  Median delta: %.2f cfs | Eligible sites: %d\n",
+  opt_median$rain_thresh, opt_median$snow_thresh,
+  opt_median$median_delta_q, opt_median$n_eligible
+))
+
+# Davenport reference points
+for (dav in list(c(DAVENPORT_LOW, DAVENPORT_LOW), c(DAVENPORT_HIGH, DAVENPORT_HIGH))) {
+  ref <- results %>%
+    filter(rain_thresh == dav[1], snow_thresh == dav[2])
+  cat(sprintf(
+    "\nDavenport (%g/%g mm): mean_delta=%.2f, median_delta=%.2f, n_eligible=%d\n",
+    dav[1], dav[2],
+    ref$mean_delta_q, ref$median_delta_q, ref$n_eligible
+  ))
+}
+
+# Save results table
+saveRDS(results, file.path(diag_dir, "grid_results.rds"))
+
+# --- Figures -----------------------------------------------------------------
+heatmap_theme <- theme_bw(base_size = 11) +
+  theme(
+    panel.grid  = element_blank(),
+    axis.text   = element_text(size = 8),
+    axis.title  = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+shared_xy <- list(
+  scale_x_continuous(breaks = seq(0, 25, 5)),
+  scale_y_continuous(breaks = seq(0, 25, 5)),
+  labs(x = "Rainfall depth threshold (mm)",
+       y = "Snowmelt depth threshold (mm)")
+)
+
+dav_points <- list(
+  geom_point(
+    data = tibble(
+      x = c(DAVENPORT_LOW,  DAVENPORT_HIGH),
+      y = c(DAVENPORT_LOW,  DAVENPORT_HIGH),
+      lbl = c("Dav. low\n(5/5)", "Dav. high\n(10/10)")
+    ),
+    aes(x = x, y = y),
+    shape = 4, size = 3, color = "white", stroke = 1.2,
+    inherit.aes = FALSE
+  ),
+  geom_text(
+    data = tibble(
+      x = c(DAVENPORT_LOW,  DAVENPORT_HIGH),
+      y = c(DAVENPORT_LOW,  DAVENPORT_HIGH),
+      lbl = c("Dav. low\n(5/5)", "Dav. high\n(10/10)")
+    ),
+    aes(x = x, y = y, label = lbl),
+    hjust = -0.15, vjust = 0.5, size = 2.3, color = "white",
+    inherit.aes = FALSE
+  )
+)
+
+opt_point <- function(opt_row, color = "yellow") {
+  list(
+    geom_point(
+      data = opt_row,
+      aes(x = rain_thresh, y = snow_thresh),
+      shape = 21, size = 3.5, fill = color, color = "black", stroke = 0.9,
+      inherit.aes = FALSE
+    ),
+    geom_text(
+      data = opt_row,
+      aes(x = rain_thresh, y = snow_thresh,
+          label = sprintf("Opt\n(%g, %g)", rain_thresh, snow_thresh)),
+      hjust = -0.15, vjust = 0.5, size = 2.5, color = color,
+      inherit.aes = FALSE
+    )
+  )
+}
+
+# Figure 1: Mean delta Q100 heatmap
+p_mean <- ggplot(results %>% filter(!is.na(mean_delta_q)),
+                 aes(x = rain_thresh, y = snow_thresh, fill = mean_delta_q)) +
+  geom_tile() +
+  opt_point(opt_mean) +
+  dav_points +
+  scale_fill_distiller(palette = "RdYlBu", direction = 1,
+                       name = "Mean delta\nQ100 (cfs)",
+                       na.value = "grey80") +
+  shared_xy +
+  labs(
+    title    = "Mean [Q_mixture(100) - Q_singlesample(100)] across eligible sites",
+    subtitle = sprintf("Optimal: rain=%g mm, snow=%g mm | mean delta=%.2f cfs | n=%d sites",
+                       opt_mean$rain_thresh, opt_mean$snow_thresh,
+                       opt_mean$mean_delta_q, opt_mean$n_eligible)
+  ) +
+  heatmap_theme
+
+# Figure 2: Eligible site count heatmap
+p_sites <- ggplot(results,
+                  aes(x = rain_thresh, y = snow_thresh, fill = n_eligible)) +
+  geom_tile() +
+  opt_point(opt_mean) +
+  dav_points +
+  scale_fill_viridis_c(name = "Eligible\nsites", option = "magma",
+                       direction = -1) +
+  shared_xy +
+  labs(
+    title    = "Number of eligible sites (>= 2 types with >= 20 events)",
+    subtitle = sprintf("Max eligible: %d", max(results$n_eligible, na.rm = TRUE))
+  ) +
+  heatmap_theme
+
+# Figure 3: Sensitivity curves at optimum
+sens_rain <- results %>%
+  filter(snow_thresh == opt_mean$snow_thresh, !is.na(mean_delta_q)) %>%
+  arrange(rain_thresh)
+
+sens_snow <- results %>%
+  filter(rain_thresh == opt_mean$rain_thresh, !is.na(mean_delta_q)) %>%
+  arrange(snow_thresh)
+
+p_sens <- ggplot() +
+  geom_line(data = sens_rain,
+            aes(x = rain_thresh, y = mean_delta_q,
+                color = "Vary rain (snow fixed)"),
+            linewidth = 0.8) +
+  geom_line(data = sens_snow,
+            aes(x = snow_thresh, y = mean_delta_q,
+                color = "Vary snow (rain fixed)"),
+            linewidth = 0.8) +
+  geom_vline(xintercept = opt_mean$rain_thresh, linetype = "dotted",
+             color = "grey40", linewidth = 0.5) +
+  geom_vline(xintercept = c(DAVENPORT_LOW, DAVENPORT_HIGH),
+             linetype = "dashed", color = "grey60", linewidth = 0.4) +
+  annotate("text", x = DAVENPORT_LOW,  y = -Inf,
+           label = "Dav.\nlow",  vjust = -0.2, hjust = 1.1,
+           size = 2.4, color = "grey50") +
+  annotate("text", x = DAVENPORT_HIGH, y = -Inf,
+           label = "Dav.\nhigh", vjust = -0.2, hjust = -0.1,
+           size = 2.4, color = "grey50") +
+  scale_color_manual(
+    values = c("Vary rain (snow fixed)" = "#E07B39",
+               "Vary snow (rain fixed)" = "#5B8DB8"),
+    name = NULL
+  ) +
+  labs(
+    title    = "Sensitivity at optimal threshold",
+    subtitle = sprintf("Optimal: rain=%g mm, snow=%g mm",
+                       opt_mean$rain_thresh, opt_mean$snow_thresh),
+    x        = "Threshold (mm)",
+    y        = "Mean delta Q100 (cfs)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank(), legend.position = "top")
+
+# Figure 4: Median delta Q100 heatmap (robustness check)
+p_median <- ggplot(results %>% filter(!is.na(median_delta_q)),
+                   aes(x = rain_thresh, y = snow_thresh, fill = median_delta_q)) +
+  geom_tile() +
+  opt_point(opt_median, color = "cyan") +
+  dav_points +
+  scale_fill_distiller(palette = "RdYlBu", direction = 1,
+                       name = "Median delta\nQ100 (cfs)",
+                       na.value = "grey80") +
+  shared_xy +
+  labs(
+    title    = "Median delta Q100 (robustness check vs. mean)",
+    subtitle = sprintf("Optimal: rain=%g mm, snow=%g mm | median delta=%.2f cfs | n=%d sites",
+                       opt_median$rain_thresh, opt_median$snow_thresh,
+                       opt_median$median_delta_q, opt_median$n_eligible)
+  ) +
+  heatmap_theme
+
+# Combined figure
+fig_combined <- (p_mean + p_sites) / (p_sens + p_median) +
+  plot_annotation(
+    title    = "Depth threshold optimization — GPD mixture vs. single-sample Q100",
+    subtitle = sprintf(
+      "Grid: 1-25mm x 1-25mm | MIN_TYPE_SAMPLE=%d | Target RI=%d yr | Eligible = >= 2 types",
+      MIN_TYPE_SAMPLE, TARGET_RI
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 13, face = "bold"),
+      plot.subtitle = element_text(size = 9,  color = "grey40")
+    )
+  )
+
+ggsave(file.path(diag_dir, "mean_delta_q100_heatmap.png"),
+       plot = p_mean,       width = 7,  height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "eligible_sites_heatmap.png"),
+       plot = p_sites,      width = 7,  height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "sensitivity_curves.png"),
+       plot = p_sens,       width = 7,  height = 4.5, dpi = 150)
+ggsave(file.path(diag_dir, "median_delta_q100_heatmap.png"),
+       plot = p_median,     width = 7,  height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "depth_threshold_gpd_objective.png"),
+       plot = fig_combined, width = 14, height = 11,  dpi = 150)
+
+cat(sprintf("\nFigures saved to: %s\n", diag_dir))
+
+fig_combined
+```
+
+```{r depth-threshold-optimization-full}
+# =============================================================================
+# Depth Threshold Optimization — GPD Mixture vs. Single-Sample, Multi-RI v2
+#
+# Objective: find the (rain_thresh, snow_thresh) pair that maximizes the
+# unweighted mean of per-RI mean relative deltas across upper-tail RIs:
+#
+#   mean_rel_delta(RI) = mean over eligible sites at that RI of
+#                        [ (Q_mix(RI) - Q_ss(RI)) / Q_ss(RI) ]
+#   objective = mean over RIs of mean_rel_delta(RI)
+#
+# Key changes from v1:
+#   - RIs restricted to upper tail: 10, 25, 50, 100 yr (drops 2 and 5 yr,
+#     which measured partitioning mechanics near the distribution center
+#     rather than tail behavior, and dominated the v1 aggregate)
+#   - Per-RI means computed independently over sites eligible at that RI
+#     (removes the all-RIs-finite requirement that reduced eligible n to
+#     14 sites and created a severe selection bias in v1)
+#   - Aggregate = mean of per-RI means (not mean of per-site sums), so
+#     RI-specific site dropouts do not distort the aggregate
+#
+# Classification rule (depth decision tree):
+#   rainfall  : rain_depth >= rain_thresh  AND  melt_depth <  snow_thresh
+#   snowmelt  : melt_depth >= snow_thresh  AND  rain_depth <  rain_thresh
+#   ROS       : rain_depth >= rain_thresh  AND  melt_depth >= snow_thresh
+#   unclassified : below both thresholds — excluded from fitting
+#
+# Eligibility (per site, per RI): unregulated site with >= MIN_TYPE_SAMPLE
+# events in at least TWO flood types AND finite mixture + single-sample
+# quantiles at that specific RI. Eligibility is assessed per RI independently.
+#
+# Grid: rain_thresh and snow_thresh each from 1 to 25 mm, step 1 mm (625
+# combinations).
+#
+# Outputs:
+#   grid_results_multiRI_v2.rds  — full grid table
+#   aggregate_heatmap.png        — primary objective
+#   eligible_sites_heatmap.png   — mean n eligible sites across RIs
+#   per_ri_heatmaps.png          — small-multiple heatmap, one panel per RI
+#   sensitivity_curves.png       — 1D slices through optimum
+#   depth_threshold_multiRI_v2.png — combined figure
+#
+# All saved to:
+#   _diagnostics/threshold_evaluation/depth_thresholds/gpd_objective_multiRI_v2/
+# =============================================================================
+
+library(tidyverse)
+library(lmomco)
+library(patchwork)
+
+# Pin namespace collisions
+map     <- purrr::map
+map_dfr <- purrr::map_dfr
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation",
+                       "depth_thresholds", "gpd_objective_multiRI_v2")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+source(file.path(proj_root, "functions.R"))
+
+# --- Constants ---------------------------------------------------------------
+MIN_TYPE_SAMPLE <- 20L
+TARGET_RIS      <- c(10, 25, 50, 100)   # upper tail only; drops 2 and 5 yr
+DAVENPORT_LOW   <- 5.0
+DAVENPORT_HIGH  <- 10.0
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% unreg_sites) %>%
+  filter(!is.na(rain_flux_short), !is.na(melt_flux_short),
+         !is.na(peak_flow), !is.na(peak_date),
+         !is.na(pot_threshold_cfs)) %>%
+  mutate(peak_date = as.Date(peak_date)) %>%
+  rename(rain_depth = rain_flux_short,
+         melt_depth = melt_flux_short) %>%
+  dplyr::select(site_no, peak_id, peak_date, peak_flow,
+                pot_threshold_cfs, rain_depth, melt_depth)
+
+cat(sprintf("Peaks loaded: %d across %d unregulated sites\n",
+            nrow(peaks), n_distinct(peaks$site_no)))
+
+peaks_by_site <- split(peaks, peaks$site_no)
+
+# --- Helper: invert mixture SF at a single RI --------------------------------
+mixture_quantile_at_ri <- function(fits, ri) {
+  target <- 1 / ri
+  lb     <- min(sapply(fits, function(f) f$mu), na.rm = TRUE)
+  ub     <- max(sapply(fits, function(f) gpd_quantile(target, f)),
+                na.rm = TRUE) * 2
+  ub     <- max(ub, lb + 1)
+  for (i in seq_len(40)) {
+    if (isTRUE(mixture_sf(ub, fits) < target)) break
+    ub <- ub * 2
+  }
+  f_lb <- mixture_sf(lb, fits) - target
+  f_ub <- mixture_sf(ub, fits) - target
+  if (is.na(f_lb) || is.na(f_ub) || sign(f_lb) == sign(f_ub)) return(NA_real_)
+  tryCatch(
+    uniroot(function(x) mixture_sf(x, fits) - target,
+            lower = lb, upper = ub, tol = 0.1)$root,
+    error = function(e) NA_real_
+  )
+}
+
+# --- Core evaluation function ------------------------------------------------
+# Returns one row per eligible site with per-RI relative deltas (NA allowed).
+# A site is included if it has >= 2 fitted types and a valid single-sample fit.
+# Each RI's relative delta is NA if mixture inversion fails at that RI.
+# Aggregation uses per-RI means over finite sites — eligibility assessed per RI.
+evaluate_thresholds <- function(rain_thresh, snow_thresh) {
+
+  site_results <- purrr::map_dfr(peaks_by_site, function(sp) {
+    mu <- sp$pot_threshold_cfs[1]
+
+    # Classify
+    sp <- sp %>%
+      mutate(depth_class = case_when(
+        rain_depth >= rain_thresh & melt_depth <  snow_thresh ~ "rainfall",
+        melt_depth >= snow_thresh & rain_depth <  rain_thresh ~ "snowmelt",
+        rain_depth >= rain_thresh & melt_depth >= snow_thresh ~ "ROS",
+        TRUE                                                  ~ "unclassified"
+      ))
+
+    # Require >= 2 types with MIN_TYPE_SAMPLE
+    eligible_types <- sp %>%
+      filter(depth_class != "unclassified") %>%
+      dplyr::count(depth_class) %>%
+      filter(n >= MIN_TYPE_SAMPLE) %>%
+      pull(depth_class)
+
+    if (length(eligible_types) < 2) return(NULL)
+
+    # Per-type GPD fits
+    type_fits <- purrr::map(eligible_types, function(tp) {
+      sub <- sp %>% filter(depth_class == tp)
+      fit_gpd(sub$peak_flow, sub$peak_date,
+              mu_threshold = mu, min_n = MIN_TYPE_SAMPLE)
+    })
+    names(type_fits) <- eligible_types
+    type_fits <- Filter(Negate(is.null), type_fits)
+    if (length(type_fits) < 2) return(NULL)
+
+    # Single-sample GPD
+    all_classified <- sp %>% filter(depth_class != "unclassified")
+    ss_fit <- fit_gpd(all_classified$peak_flow, all_classified$peak_date,
+                      mu_threshold = mu, min_n = MIN_TYPE_SAMPLE)
+    if (is.null(ss_fit)) return(NULL)
+
+    # Per-RI relative delta — NA allowed; eligibility assessed per RI
+    rel_deltas <- purrr::map_dbl(TARGET_RIS, function(ri) {
+      q_mix <- mixture_quantile_at_ri(type_fits, ri)
+      q_ss  <- gpd_quantile(1 / ri, ss_fit)
+      if (is.na(q_mix) || is.na(q_ss) || q_ss <= 0) return(NA_real_)
+      (q_mix - q_ss) / q_ss
+    })
+    names(rel_deltas) <- paste0("rel_delta_", TARGET_RIS)
+
+    # Include site as long as at least one RI is finite
+    if (all(is.na(rel_deltas))) return(NULL)
+
+    bind_cols(
+      tibble(site_no = sp$site_no[1], n_types = length(type_fits)),
+      as_tibble(as.list(rel_deltas))
+    )
+  })
+
+  ri_col_names <- paste0("rel_delta_", TARGET_RIS)
+
+  if (nrow(site_results) == 0) {
+    base    <- tibble(mean_agg = NA_real_, mean_n_eligible = 0L)
+    ri_cols <- setNames(
+      as.list(rep(NA_real_, length(TARGET_RIS))),
+      paste0("mean_rel_delta_", TARGET_RIS)
+    )
+    n_cols <- setNames(
+      as.list(rep(0L, length(TARGET_RIS))),
+      paste0("n_eligible_", TARGET_RIS)
+    )
+    return(bind_cols(base, as_tibble(ri_cols), as_tibble(n_cols)))
+  }
+
+  # Per-RI mean over sites with finite values at that RI
+  ri_means <- purrr::map_dfc(TARGET_RIS, function(ri) {
+    col  <- paste0("rel_delta_", ri)
+    vals <- site_results[[col]]
+    tibble(
+      !!paste0("mean_rel_delta_", ri) := mean(vals, na.rm = TRUE),
+      !!paste0("n_eligible_",     ri) := sum(!is.na(vals))
+    )
+  })
+
+  # Aggregate = unweighted mean of per-RI means (only over RIs with >=1 site)
+  per_ri_means <- unlist(ri_means[, paste0("mean_rel_delta_", TARGET_RIS)])
+  mean_agg     <- mean(per_ri_means, na.rm = TRUE)
+
+  # Mean eligible n across RIs (for heatmap)
+  per_ri_n        <- unlist(ri_means[, paste0("n_eligible_", TARGET_RIS)])
+  mean_n_eligible <- mean(per_ri_n, na.rm = TRUE)
+
+  bind_cols(
+    tibble(mean_agg = mean_agg, mean_n_eligible = mean_n_eligible),
+    ri_means
+  )
+}
+
+# --- Grid search -------------------------------------------------------------
+thresh_seq <- seq(1, 25, by = 1)
+grid       <- expand.grid(rain_thresh = thresh_seq, snow_thresh = thresh_seq)
+
+cat(sprintf("Grid size: %d combinations | RIs: %s\n",
+            nrow(grid), paste(TARGET_RIS, collapse = ", ")))
+cat("Running grid search...\n")
+
+t0 <- proc.time()
+
+results <- purrr::map2_dfr(
+  grid$rain_thresh,
+  grid$snow_thresh,
+  function(r, s) {
+    res <- evaluate_thresholds(r, s)
+    bind_cols(tibble(rain_thresh = r, snow_thresh = s), res)
+  }
+)
+
+elapsed <- proc.time() - t0
+cat(sprintf("Grid search complete: %.1f seconds\n", elapsed["elapsed"]))
+
+# --- Report optima -----------------------------------------------------------
+opt <- results %>%
+  filter(!is.na(mean_agg)) %>%
+  slice_max(mean_agg, n = 1, with_ties = FALSE)
+
+cat(sprintf(
+  "\nOptimal (mean of per-RI means):\n  Rain: %g mm | Snow: %g mm\n  Mean agg: %.4f | Mean eligible sites: %.1f\n",
+  opt$rain_thresh, opt$snow_thresh, opt$mean_agg, opt$mean_n_eligible
+))
+
+for (dav in list(c(DAVENPORT_LOW, DAVENPORT_LOW),
+                 c(DAVENPORT_HIGH, DAVENPORT_HIGH))) {
+  ref <- results %>%
+    filter(rain_thresh == dav[1], snow_thresh == dav[2])
+  cat(sprintf(
+    "Davenport (%g/%g mm): mean_agg=%.4f, mean_n_eligible=%.1f\n",
+    dav[1], dav[2], ref$mean_agg, ref$mean_n_eligible
+  ))
+}
+
+# Per-RI optimum summary
+cat("\nPer-RI optima:\n")
+for (ri in TARGET_RIS) {
+  col   <- paste0("mean_rel_delta_", ri)
+  n_col <- paste0("n_eligible_", ri)
+  ri_opt <- results %>%
+    filter(!is.na(.data[[col]])) %>%
+    slice_max(.data[[col]], n = 1, with_ties = FALSE)
+  cat(sprintf("  RI=%3d yr: rain=%g mm, snow=%g mm, mean_rel_delta=%.4f, n=%d\n",
+              ri, ri_opt$rain_thresh, ri_opt$snow_thresh,
+              ri_opt[[col]], ri_opt[[n_col]]))
+}
+
+saveRDS(results, file.path(diag_dir, "grid_results_multiRI_v2.rds"))
+
+# --- Shared plot elements ----------------------------------------------------
+heatmap_theme <- theme_bw(base_size = 11) +
+  theme(
+    panel.grid  = element_blank(),
+    axis.text   = element_text(size = 8),
+    axis.title  = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+
+shared_xy <- list(
+  scale_x_continuous(breaks = seq(0, 25, 5)),
+  scale_y_continuous(breaks = seq(0, 25, 5)),
+  labs(x = "Rainfall depth threshold (mm)",
+       y = "Snowmelt depth threshold (mm)")
+)
+
+dav_overlay <- list(
+  geom_point(
+    data = tibble(
+      x   = c(DAVENPORT_LOW,       DAVENPORT_HIGH),
+      y   = c(DAVENPORT_LOW,       DAVENPORT_HIGH),
+      lbl = c("Dav. low\n(5/5)", "Dav. high\n(10/10)")
+    ),
+    aes(x = x, y = y),
+    shape = 4, size = 3, color = "white", stroke = 1.2,
+    inherit.aes = FALSE
+  ),
+  geom_text(
+    data = tibble(
+      x   = c(DAVENPORT_LOW,       DAVENPORT_HIGH),
+      y   = c(DAVENPORT_LOW,       DAVENPORT_HIGH),
+      lbl = c("Dav. low\n(5/5)", "Dav. high\n(10/10)")
+    ),
+    aes(x = x, y = y, label = lbl),
+    hjust = -0.15, vjust = 0.5, size = 2.3, color = "white",
+    inherit.aes = FALSE
+  )
+)
+
+opt_overlay <- list(
+  geom_point(
+    data = opt,
+    aes(x = rain_thresh, y = snow_thresh),
+    shape = 21, size = 3.5, fill = "yellow", color = "black", stroke = 0.9,
+    inherit.aes = FALSE
+  ),
+  geom_text(
+    data = opt,
+    aes(x = rain_thresh, y = snow_thresh,
+        label = sprintf("Opt\n(%g,%g)", rain_thresh, snow_thresh)),
+    hjust = -0.15, vjust = 0.5, size = 2.5, color = "yellow",
+    inherit.aes = FALSE
+  )
+)
+
+# --- Figure 1: Aggregate heatmap ---------------------------------------------
+p_agg <- ggplot(results %>% filter(!is.na(mean_agg)),
+                aes(x = rain_thresh, y = snow_thresh, fill = mean_agg)) +
+  geom_tile() +
+  opt_overlay +
+  dav_overlay +
+  scale_fill_distiller(palette = "RdYlBu", direction = 1,
+                       name = "Mean\nagg. metric",
+                       na.value = "grey80") +
+  shared_xy +
+  labs(
+    title    = "Aggregate metric — mean of per-RI mean relative delta Q",
+    subtitle = sprintf(
+      "Optimal: rain=%g mm, snow=%g mm | mean agg=%.4f | mean n=%.1f sites",
+      opt$rain_thresh, opt$snow_thresh, opt$mean_agg, opt$mean_n_eligible)
+  ) +
+  heatmap_theme
+
+# --- Figure 2: Eligible sites heatmap ----------------------------------------
+p_sites <- ggplot(results,
+                  aes(x = rain_thresh, y = snow_thresh, fill = mean_n_eligible)) +
+  geom_tile() +
+  opt_overlay +
+  dav_overlay +
+  scale_fill_viridis_c(name = "Mean\neligible\nsites", option = "magma",
+                       direction = -1) +
+  shared_xy +
+  labs(
+    title    = "Mean eligible sites across RIs (per-RI independent eligibility)",
+    subtitle = sprintf("Max mean eligible: %.1f", max(results$mean_n_eligible, na.rm = TRUE))
+  ) +
+  heatmap_theme
+
+# --- Figure 3: Per-RI small-multiple heatmaps --------------------------------
+# Find shared fill scale across all RI panels for direct comparison
+ri_col_names <- paste0("mean_rel_delta_", TARGET_RIS)
+fill_range <- range(
+  unlist(results[, ri_col_names]),
+  na.rm = TRUE
+)
+# Symmetric around zero for easier interpretation
+fill_lim <- c(-max(abs(fill_range)), max(abs(fill_range)))
+
+per_ri_panels <- purrr::map(TARGET_RIS, function(ri) {
+  col <- paste0("mean_rel_delta_", ri)
+
+  ri_opt <- results %>%
+    filter(!is.na(.data[[col]])) %>%
+    slice_max(.data[[col]], n = 1, with_ties = FALSE)
+
+  ggplot(results %>% filter(!is.na(.data[[col]])),
+         aes(x = rain_thresh, y = snow_thresh,
+             fill = .data[[col]])) +
+    geom_tile() +
+    geom_point(
+      data = ri_opt,
+      aes(x = rain_thresh, y = snow_thresh),
+      shape = 21, size = 2.5, fill = "yellow", color = "black", stroke = 0.7,
+      inherit.aes = FALSE
+    ) +
+    dav_overlay +
+    scale_fill_distiller(palette = "RdYlBu", direction = 1,
+                         name = "Rel.\ndelta",
+                         limits = fill_lim,
+                         na.value = "grey80") +
+    scale_x_continuous(breaks = seq(0, 25, 5)) +
+    scale_y_continuous(breaks = seq(0, 25, 5)) +
+    labs(
+      title    = sprintf("RI = %d yr", ri),
+      subtitle = sprintf("Opt: rain=%g, snow=%g",
+                         ri_opt$rain_thresh, ri_opt$snow_thresh),
+      x = "Rain thresh (mm)",
+      y = "Snow thresh (mm)"
+    ) +
+    theme_bw(base_size = 9) +
+    theme(
+      panel.grid  = element_blank(),
+      axis.text   = element_text(size = 7),
+      axis.title  = element_text(size = 8),
+      legend.text = element_text(size = 7),
+      plot.title  = element_text(size = 9, face = "bold"),
+      plot.subtitle = element_text(size = 7, color = "grey40")
+    )
+})
+
+fig_per_ri <- wrap_plots(per_ri_panels, nrow = 2, guides = "collect") +
+  plot_annotation(
+    title    = "Per-RI mean relative delta Q — (Q_mix - Q_ss) / Q_ss",
+    subtitle = sprintf("Shared fill scale [%.3f, %.3f] | MIN_TYPE_SAMPLE=%d",
+                       fill_lim[1], fill_lim[2], MIN_TYPE_SAMPLE),
+    theme = theme(
+      plot.title    = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9,  color = "grey40")
+    )
+  )
+
+# --- Figure 4: Sensitivity curves at aggregate optimum -----------------------
+sens_rain <- results %>%
+  filter(snow_thresh == opt$snow_thresh, !is.na(mean_agg)) %>%
+  arrange(rain_thresh)
+
+sens_snow <- results %>%
+  filter(rain_thresh == opt$rain_thresh, !is.na(mean_agg)) %>%
+  arrange(snow_thresh)
+
+p_sens <- ggplot() +
+  geom_line(data = sens_rain,
+            aes(x = rain_thresh, y = mean_agg,
+                color = "Vary rain (snow fixed)"),
+            linewidth = 0.8) +
+  geom_line(data = sens_snow,
+            aes(x = snow_thresh, y = mean_agg,
+                color = "Vary snow (rain fixed)"),
+            linewidth = 0.8) +
+  geom_vline(xintercept = opt$rain_thresh, linetype = "dotted",
+             color = "grey40", linewidth = 0.5) +
+  geom_vline(xintercept = c(DAVENPORT_LOW, DAVENPORT_HIGH),
+             linetype = "dashed", color = "grey60", linewidth = 0.4) +
+  annotate("text", x = DAVENPORT_LOW,  y = -Inf,
+           label = "Dav.\nlow",  vjust = -0.2, hjust = 1.1,
+           size = 2.4, color = "grey50") +
+  annotate("text", x = DAVENPORT_HIGH, y = -Inf,
+           label = "Dav.\nhigh", vjust = -0.2, hjust = -0.1,
+           size = 2.4, color = "grey50") +
+  scale_color_manual(
+    values = c("Vary rain (snow fixed)" = "#E07B39",
+               "Vary snow (rain fixed)" = "#5B8DB8"),
+    name = NULL
+  ) +
+  labs(
+    title    = "Sensitivity at aggregate optimum",
+    subtitle = sprintf("Optimal: rain=%g mm, snow=%g mm",
+                       opt$rain_thresh, opt$snow_thresh),
+    x        = "Threshold (mm)",
+    y        = "Mean aggregate metric"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank(), legend.position = "top")
+
+# --- Save individual figures -------------------------------------------------
+ggsave(file.path(diag_dir, "aggregate_heatmap.png"),
+       plot = p_agg,      width = 7,  height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "eligible_sites_heatmap.png"),
+       plot = p_sites,    width = 7,  height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "per_ri_heatmaps.png"),
+       plot = fig_per_ri, width = 14, height = 9,   dpi = 150)
+ggsave(file.path(diag_dir, "sensitivity_curves.png"),
+       plot = p_sens,     width = 7,  height = 4.5, dpi = 150)
+
+# --- Combined figure ---------------------------------------------------------
+fig_combined <- (p_agg + p_sites) / (p_sens + plot_spacer()) +
+  plot_annotation(
+    title    = "Depth threshold optimization — upper-tail multi-RI aggregate (v2)",
+    subtitle = sprintf(
+      "RIs: %s yr | Grid: 1-25mm x 1-25mm | MIN_TYPE_SAMPLE=%d | Metric: mean of per-RI mean[(Q_mix-Q_ss)/Q_ss]",
+      paste(TARGET_RIS, collapse = ", "), MIN_TYPE_SAMPLE
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 13, face = "bold"),
+      plot.subtitle = element_text(size = 9,  color = "grey40")
+    )
+  )
+
+ggsave(file.path(diag_dir, "depth_threshold_multiRI_v2.png"),
+       plot = fig_combined, width = 14, height = 11, dpi = 150)
+
+cat(sprintf("\nAll outputs saved to: %s\n", diag_dir))
+
+fig_per_ri
+```
+
+# Rainfall fraction threshold evaluation
+```{r rainfall-fraction-thresholds-1}
+# =============================================================================
+# Rainfall Fraction Threshold Evaluation — Joint GMM in rain_frac x SWE space
+#
+# NOTE: GMM is used here as a boundary-identification tool in a specific 2D
+# subspace (rain_frac x log10(SWE + 1)), not as the classification engine
+# directly. Prior work found GMM non-viable as a classifier due to class
+# imbalance and continuous process distributions; that finding does not
+# preclude this more constrained use. Panel 2 of the joint distributions
+# figure showed sufficient visual structure in this subspace to justify
+# proceeding.
+# =============================================================================
+
+library(tidyverse)
+library(mclust)
+library(patchwork)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation",
+                       "gmm_rain_frac_swe")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+SNOW_EM_THRESH <- 0.10
+RAIN_EM_THRESH <- 0.95
+SWE_LOG_OFFSET <- 1.0   # mm; added before log10 to handle near-zero SWE
+
+# Covariance structures to include in BIC plot
+BIC_MODELS <- c("EEE", "VVV", "EEV")
+
+# Flood type colors (consistent with pipeline palette)
+type_colors <- c(
+  "rainfall"     = "#E07B39",
+  "snowmelt"     = "#5B8DB8",
+  "ROS"          = "#6A9E6F",
+  "unclassified" = "grey70"
+)
+
+# --- Load and prepare data ---------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+peaks_raw <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% (meta %>% filter(!regulated) %>% pull(site_no)))
+
+# GMM fitting subset: require valid rain_frac and swe_mean_mm
+gmm_data <- peaks_raw %>%
+  filter(!is.na(rain_frac), !is.na(swe_mean_mm)) %>%
+  mutate(swe_log = log10(swe_mean_mm + SWE_LOG_OFFSET))
+
+cat(sprintf("Peaks available for GMM: %d (of %d total)\n",
+            nrow(gmm_data), nrow(peaks_raw)))
+cat(sprintf("Peaks excluded (NA rain_frac or swe_mean_mm): %d\n",
+            nrow(peaks_raw) - nrow(gmm_data)))
+
+# Scale features to zero mean / unit variance before fitting
+rain_frac_mean <- mean(gmm_data$rain_frac)
+rain_frac_sd   <- sd(gmm_data$rain_frac)
+swe_log_mean   <- mean(gmm_data$swe_log)
+swe_log_sd     <- sd(gmm_data$swe_log)
+
+gmm_data <- gmm_data %>%
+  mutate(
+    rain_frac_scaled = (rain_frac - rain_frac_mean) / rain_frac_sd,
+    swe_log_scaled   = (swe_log   - swe_log_mean)   / swe_log_sd
+  )
+
+X <- gmm_data %>% select(rain_frac_scaled, swe_log_scaled) %>% as.matrix()
+
+# --- Fit GMM: G = 2, 3, 4 with restricted model set -------------------------
+cat("\nFitting GMM solutions (G = 2, 3, 4)...\n")
+
+fit <- Mclust(X, G = 2:4, modelNames = BIC_MODELS, verbose = FALSE)
+
+cat(sprintf("\nBIC-selected solution: G = %d, model = %s\n",
+            fit$G, fit$modelName))
+cat(sprintf("BIC values:\n"))
+print(fit$BIC)
+
+# Per-component summary in original units
+gmm_data <- gmm_data %>%
+  mutate(gmm_component = fit$classification)
+
+comp_summary <- gmm_data %>%
+  group_by(gmm_component) %>%
+  summarise(
+    n            = dplyr::n(),
+    rain_frac_med = median(rain_frac),
+    swe_med_mm    = median(swe_mean_mm),
+    .groups = "drop"
+  )
+cat("\nComponent summary (original units):\n")
+print(comp_summary)
+
+# Order components by median rain_frac ascending — used for boundary
+# extraction and classification change analysis
+comp_order <- order(comp_summary$rain_frac_med)
+
+# --- BIC plot ----------------------------------------------------------------
+# mclust BIC object is a matrix [G x models]; extract carefully
+bic_matrix <- fit$BIC  # class "mclustBIC", underlying matrix
+
+bic_df <- as.data.frame(unclass(bic_matrix)) %>%
+  rownames_to_column("G") %>%
+  mutate(G = as.integer(G)) %>%
+  pivot_longer(-G, names_to = "model", values_to = "BIC") %>%
+  filter(!is.na(BIC), model %in% BIC_MODELS)
+
+p_bic <- ggplot(bic_df, aes(x = G, y = BIC, color = model, group = model)) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2:4) +
+  scale_color_brewer(palette = "Set2", name = "Covariance") +
+  labs(
+    title    = "GMM BIC by number of components and covariance structure",
+    subtitle = sprintf("Features: rain_frac x log10(SWE + 1), scaled; n = %d peaks",
+                       nrow(gmm_data)),
+    x        = "Number of components (G)",
+    y        = "BIC"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave(file.path(diag_dir, "gmm_bic_curve.png"),
+       plot = p_bic, width = 6, height = 4, dpi = 150)
+
+# --- Boundary extraction -----------------------------------------------------
+# Equal-posterior boundary: for each pair of adjacent components (ordered by
+# median rain_frac), find the rain_frac value at which P(A) = P(B) = 0.5
+# evaluated at a specified SWE value.
+#
+# Boundary evaluated at two physically motivated SWE points:
+#   low-SWE  : median SWE of flood_type_raw == "rainfall" events
+#   high-SWE : median SWE of flood_type_raw == "snowmelt" events
+
+swe_low_mm  <- median(gmm_data$swe_mean_mm[gmm_data$flood_type_raw == "rainfall"],
+                      na.rm = TRUE)
+swe_high_mm <- median(gmm_data$swe_mean_mm[gmm_data$flood_type_raw == "snowmelt"],
+                      na.rm = TRUE)
+
+cat(sprintf("\nBoundary evaluation points:\n"))
+cat(sprintf("  Low-SWE  (median rainfall SWE)  : %.2f mm\n", swe_low_mm))
+cat(sprintf("  High-SWE (median snowmelt SWE)  : %.2f mm\n", swe_high_mm))
+
+# Function: given a fixed SWE (mm, original units), compute posterior
+# probabilities across a rain_frac grid and find equal-posterior crossings
+find_boundary_rain_frac <- function(fit, swe_mm_fixed,
+                                    rain_frac_mean, rain_frac_sd,
+                                    swe_log_mean, swe_log_sd,
+                                    swe_log_offset = 1.0,
+                                    n_grid = 2000) {
+  rf_grid <- seq(0, 1, length.out = n_grid)
+
+  swe_log_fixed  <- log10(swe_mm_fixed + swe_log_offset)
+  rf_scaled      <- (rf_grid - rain_frac_mean) / rain_frac_sd
+  swe_scaled     <- rep((swe_log_fixed - swe_log_mean) / swe_log_sd, n_grid)
+
+  grid_mat <- cbind(rf_scaled, swe_scaled)
+  probs    <- predict(fit, newdata = grid_mat)$z  # n_grid x G matrix
+
+  # Order components by median rain_frac (ascending) for consistent labeling
+  comp_order <- order(comp_summary$rain_frac_med)
+
+  boundaries <- list()
+  for (i in seq_len(ncol(probs) - 1)) {
+    ca <- comp_order[i]
+    cb <- comp_order[i + 1]
+    diff_probs <- probs[, ca] - probs[, cb]
+    sign_changes <- which(diff(sign(diff_probs)) != 0)
+    if (length(sign_changes) > 0) {
+      # Linear interpolation to refine crossing
+      idx <- sign_changes[1]
+      rf_cross <- rf_grid[idx] +
+        (rf_grid[idx + 1] - rf_grid[idx]) *
+        abs(diff_probs[idx]) / (abs(diff_probs[idx]) + abs(diff_probs[idx + 1]))
+      boundaries[[paste0("C", ca, "_C", cb)]] <- rf_cross
+    }
+  }
+  boundaries
+}
+
+bounds_low  <- find_boundary_rain_frac(fit, swe_low_mm,
+                                        rain_frac_mean, rain_frac_sd,
+                                        swe_log_mean,   swe_log_sd)
+bounds_high <- find_boundary_rain_frac(fit, swe_high_mm,
+                                        rain_frac_mean, rain_frac_sd,
+                                        swe_log_mean,   swe_log_sd)
+
+cat("\nGMM-derived rain_frac boundaries:\n")
+cat("  At low-SWE (rainfall median):\n")
+for (nm in names(bounds_low))
+  cat(sprintf("    %s : rain_frac = %.3f\n", nm, bounds_low[[nm]]))
+cat("  At high-SWE (snowmelt median):\n")
+for (nm in names(bounds_high))
+  cat(sprintf("    %s : rain_frac = %.3f\n", nm, bounds_high[[nm]]))
+
+cat(sprintf("\nCurrent thresholds: SNOW_EM_THRESH = %.2f, RAIN_EM_THRESH = %.2f\n",
+            SNOW_EM_THRESH, RAIN_EM_THRESH))
+
+# --- Component ellipse overlay (uncolored) -----------------------------------
+# Helper: generate ellipse polygon for a single GMM component in scaled space,
+# then back-transform to original units for plotting
+make_ellipse <- function(mu, sigma, n_sd = 2, n_pts = 200) {
+  theta  <- seq(0, 2 * pi, length.out = n_pts)
+  circle <- rbind(cos(theta), sin(theta))
+  L      <- chol(sigma)
+  ell    <- t(L) %*% circle
+  data.frame(
+    x_scaled = mu[1] + n_sd * ell[1, ],
+    y_scaled = mu[2] + n_sd * ell[2, ]
+  ) %>%
+    mutate(
+      rain_frac = x_scaled * rain_frac_sd + rain_frac_mean,
+      swe_log   = y_scaled * swe_log_sd   + swe_log_mean,
+      swe_mm    = 10^swe_log - SWE_LOG_OFFSET
+    )
+}
+
+ellipses_df <- map_dfr(seq_len(fit$G), function(g) {
+  mu    <- fit$parameters$mean[, g]
+  sigma <- fit$parameters$variance$sigma[, , g]
+  make_ellipse(mu, sigma) %>% mutate(component = factor(g))
+})
+
+p_ellipse_base <- ggplot(gmm_data,
+                         aes(x = rain_frac, y = swe_mean_mm + SWE_LOG_OFFSET)) +
+  geom_point(alpha = 0.18, size = 0.7, color = "steelblue4") +
+  geom_path(data = ellipses_df,
+            aes(x = rain_frac, y = swe_mm + SWE_LOG_OFFSET,
+                group = component, color = component),
+            linewidth = 0.8) +
+  scale_color_brewer(palette = "Set1", name = "Component") +
+  scale_y_log10() +
+  annotation_logticks(sides = "l") +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  geom_vline(xintercept = SNOW_EM_THRESH, linetype = "dashed",
+             color = "grey30", linewidth = 0.45) +
+  geom_vline(xintercept = RAIN_EM_THRESH, linetype = "dashed",
+             color = "grey30", linewidth = 0.45) +
+  annotate("text", x = SNOW_EM_THRESH, y = Inf, label = "0.10",
+           hjust = 1.1, vjust = 1.3, size = 2.8, color = "grey30") +
+  annotate("text", x = RAIN_EM_THRESH, y = Inf, label = "0.95",
+           hjust = -0.1, vjust = 1.3, size = 2.8, color = "grey30") +
+  labs(
+    title    = "GMM component ellipses (2 SD) — rain fraction x SWE",
+    subtitle = sprintf("G = %d (%s); uncolored points", fit$G, fit$modelName),
+    x        = "Rain fraction",
+    y        = "Mean antecedent SWE + 1 (mm, log scale)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave(file.path(diag_dir, "gmm_ellipses_uncolored.png"),
+       plot = p_ellipse_base, width = 7, height = 5, dpi = 150)
+
+# --- Validation: color by flood_type_raw -------------------------------------
+p_ellipse_typed <- ggplot(gmm_data,
+                           aes(x = rain_frac, y = swe_mean_mm + SWE_LOG_OFFSET,
+                               color = flood_type_raw)) +
+  geom_point(alpha = 0.25, size = 0.8) +
+  geom_path(data = ellipses_df,
+            aes(x = rain_frac, y = swe_mm + SWE_LOG_OFFSET,
+                group = component),
+            color = "black", linewidth = 1.0, inherit.aes = FALSE) +
+  scale_color_manual(values = type_colors, name = "Flood type\n(current)") +
+  scale_y_log10() +
+  annotation_logticks(sides = "l") +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  geom_vline(xintercept = SNOW_EM_THRESH, linetype = "dashed",
+             color = "grey40", linewidth = 0.45) +
+  geom_vline(xintercept = RAIN_EM_THRESH, linetype = "dashed",
+             color = "grey40", linewidth = 0.45) +
+  annotate("text", x = SNOW_EM_THRESH, y = Inf, label = "0.10",
+           hjust = 1.1, vjust = 1.3, size = 2.8, color = "grey40") +
+  annotate("text", x = RAIN_EM_THRESH, y = Inf, label = "0.95",
+           hjust = -0.1, vjust = 1.3, size = 2.8, color = "grey40") +
+  labs(
+    title    = "GMM boundaries vs. current classification — rain fraction x SWE",
+    subtitle = sprintf(
+      "G = %d (%s); black ellipses = GMM 2-SD boundaries; dashed = current thresholds",
+      fit$G, fit$modelName),
+    x        = "Rain fraction",
+    y        = "Mean antecedent SWE + 1 (mm, log scale)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave(file.path(diag_dir, "gmm_ellipses_typed.png"),
+       plot = p_ellipse_typed, width = 7.5, height = 5, dpi = 150)
+
+# --- Classification change analysis ------------------------------------------
+# Compare GMM component assignment against current flood_type_raw.
+# GMM components are ordered by median rain_frac; the mapping to process
+# labels is inferred from component_summary rather than assumed.
+gmm_data <- gmm_data %>%
+  mutate(gmm_component_ordered = factor(
+    gmm_component,
+    levels = comp_order,
+    labels = paste0("GMM_", seq_along(comp_order))
+  ))
+
+change_tbl <- gmm_data %>%
+  dplyr::count(flood_type_raw, gmm_component_ordered) %>%
+  group_by(flood_type_raw) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ungroup()
+
+cat("\nClassification agreement (current flood_type_raw vs GMM component):\n")
+print(change_tbl, n = Inf)
+
+n_would_change <- gmm_data %>%
+  # Flag events where GMM modal assignment does not match dominant component
+  # for their current flood_type_raw label
+  group_by(flood_type_raw) %>%
+  mutate(dominant_comp = names(which.max(table(gmm_component)))) %>%
+  ungroup() %>%
+  filter(as.character(gmm_component) != dominant_comp) %>%
+  nrow()
+
+cat(sprintf(
+  "\nEvents potentially reclassified under GMM: %d (%.1f%% of %d)\n",
+  n_would_change, n_would_change / nrow(gmm_data) * 100, nrow(gmm_data)
+))
+```
+
+```{r rainfall-fraction-thresholds-2}
+# =============================================================================
+# GMM Diagnostic: Rainfall component split investigation
+# Are GMM components 1 and 3 (low-SWE, high rain-fraction) physically
+# distinct or a geometric artifact of data compression in that corner?
+# =============================================================================
+
+# Assign each peak to its maximum-posterior component
+gmm_data <- gmm_data %>%
+  mutate(
+    gmm_component     = fit$classification,
+    gmm_post_max      = apply(fit$z, 1, max)
+  )
+
+# Identify the two low-SWE, high rain-fraction components by finding the
+# two components with the highest median rain_frac from comp_summary
+top2_rain_comps <- comp_summary %>%
+  arrange(desc(rain_frac_med)) %>%
+  slice(1:2) %>%
+  pull(gmm_component) %>%
+  sort()  # sort so labeling is consistent (lower index = comp A)
+
+cat(sprintf("\nInvestigating rainfall split: GMM components %d and %d\n",
+            top2_rain_comps[1], top2_rain_comps[2]))
+
+rain_split <- gmm_data %>%
+  filter(gmm_component %in% top2_rain_comps) %>%
+  mutate(
+    comp_label = factor(
+      gmm_component,
+      levels = top2_rain_comps,
+      labels = paste0("Component ", top2_rain_comps)
+    ),
+    doy = as.integer(format(as.Date(peak_date), "%j"))
+  )
+
+# Summary statistics
+split_summary <- rain_split %>%
+  left_join(
+    meta %>% select(site_no, drain_sqkm),
+    by = "site_no"
+  ) %>%
+  mutate(q_mm_day = peak_flow * 86400 * 0.0283168 / (drain_sqkm * 1e3)) %>%
+  group_by(comp_label) %>%
+  summarise(
+    n            = dplyr::n(),
+    median_doy   = median(doy, na.rm = TRUE),
+    median_q     = median(q_mm_day, na.rm = TRUE),
+    .groups      = "drop"
+  )
+
+cat("\nRainfall component split summary:\n")
+print(split_summary)
+
+# Colors matching Set1 palette used in ellipse plots:
+# mclust component index maps to RColorBrewer Set1 order
+# Component 1 = red (#E41A1C), Component 3 = green (#4DAF4A)
+split_colors <- setNames(
+  RColorBrewer::brewer.pal(max(top2_rain_comps), "Set1")[top2_rain_comps],
+  paste0("Component ", top2_rain_comps)
+)
+
+subtitle_txt <- paste(
+  split_summary %>%
+    mutate(lbl = sprintf("%s: n=%d, median DOY=%d, median q=%.2f mm/day",
+                         comp_label, as.integer(n),
+                         as.integer(median_doy), median_q)) %>%
+    pull(lbl),
+  collapse = "  |  "
+)
+
+# --- Panel A: DOY distribution -----------------------------------------------
+pA <- ggplot(rain_split, aes(x = doy, fill = comp_label, color = comp_label)) +
+  geom_histogram(bins = 52, alpha = 0.45, position = "identity", linewidth = 0.2) +
+  scale_fill_manual(values  = split_colors, name = NULL) +
+  scale_color_manual(values = split_colors, name = NULL) +
+  scale_x_continuous(
+    breaks = c(1, 60, 121, 182, 244, 305, 366),
+    labels = c("Jan", "Mar", "May", "Jul", "Sep", "Nov", "Jan")
+  ) +
+  labs(
+    title = "A — Day of year distribution by rainfall component",
+    x     = "Day of year",
+    y     = "Count"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position  = "top"
+  )
+
+# --- Panel B: Peak flow by component -----------------------------------------
+rain_split_q <- rain_split %>%
+  left_join(meta %>% select(site_no, drain_sqkm), by = "site_no") %>%
+  mutate(q_mm_day = peak_flow * 86400 * 0.0283168 / (drain_sqkm * 1e3)) %>%
+  filter(!is.na(q_mm_day), q_mm_day > 0)
+
+pB <- ggplot(rain_split_q, aes(x = comp_label, y = q_mm_day, fill = comp_label)) +
+  geom_violin(alpha = 0.45, linewidth = 0.3, trim = TRUE) +
+  geom_boxplot(width = 0.12, outlier.size = 0.6, outlier.alpha = 0.3,
+               fill = "white", linewidth = 0.4) +
+  scale_fill_manual(values = split_colors, name = NULL) +
+  scale_y_log10(
+    breaks = c(0.01, 0.1, 1, 10, 100),
+    labels = c("0.01", "0.1", "1", "10", "100")
+  ) +
+  annotation_logticks(sides = "l") +
+  labs(
+    title = "B — Peak flow rate by rainfall component",
+    x     = NULL,
+    y     = "Peak flow (mm/day)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position  = "none"
+  )
+
+# --- Combine -----------------------------------------------------------------
+fig_split <- pA + pB +
+  plot_annotation(
+    title    = "Rainfall component split: physical process vs. geometric artifact?",
+    subtitle = subtitle_txt,
+    theme    = theme(
+      plot.title    = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 8,  color = "grey40")
+    )
+  )
+
+ggsave(
+  file.path(diag_dir, "rainfall_component_split.png"),
+  plot = fig_split, width = 10, height = 5, dpi = 150
+)
+
+fig_split
+```
+
+```{r rainfall-fraction-thresholds-3}
+# =============================================================================
+# GMM Post-processing: Merge components 1+3 into unified rainfall class
+# G=4 EEV solution retained as fitted; merger is a post-hoc label assignment
+# based on diagnostic confirmation that components 1 and 3 are not physically
+# distinct (overlapping DOY, near-identical flood magnitude distributions).
+#
+# Physically meaningful 3-class mapping:
+#   Rainfall : GMM components 1 + 3 (merged)
+#   ROS      : GMM component 2
+#   Snowmelt : GMM component 4
+# =============================================================================
+
+# --- Define merged component mapping ----------------------------------------
+# Identify component indices by median rain_frac from comp_summary
+# (do not hardcode — derive from data in case ordering shifts)
+comp_by_rain <- comp_summary %>% arrange(rain_frac_med)
+
+# Expected order ascending rain_frac: snowmelt, ROS, rainfall_low, rainfall_high
+# Component with lowest rain_frac median = snowmelt
+# Component with second-lowest         = ROS
+# Components with two highest          = rainfall (to be merged)
+comp_snowmelt  <- comp_by_rain$gmm_component[1]
+comp_ros       <- comp_by_rain$gmm_component[2]
+comp_rain_low  <- comp_by_rain$gmm_component[3]
+comp_rain_high <- comp_by_rain$gmm_component[4]
+
+cat(sprintf(
+  "Component mapping (by ascending median rain_frac):\n  Snowmelt : %d (median rf = %.3f)\n  ROS      : %d (median rf = %.3f)\n  Rain low : %d (median rf = %.3f)\n  Rain high: %d (median rf = %.3f)\n",
+  comp_snowmelt,  comp_by_rain$rain_frac_med[1],
+  comp_ros,       comp_by_rain$rain_frac_med[2],
+  comp_rain_low,  comp_by_rain$rain_frac_med[3],
+  comp_rain_high, comp_by_rain$rain_frac_med[4]
+))
+
+# Assign merged 3-class label
+gmm_data <- gmm_data %>%
+  mutate(
+    gmm_class = case_when(
+      gmm_component %in% c(comp_rain_low, comp_rain_high) ~ "rainfall",
+      gmm_component == comp_ros                           ~ "ROS",
+      gmm_component == comp_snowmelt                     ~ "snowmelt"
+    ),
+    gmm_class = factor(gmm_class, levels = c("rainfall", "ROS", "snowmelt"))
+  )
+
+class_summary <- gmm_data %>%
+  dplyr::count(gmm_class) %>%
+  mutate(pct = n / sum(n) * 100)
+cat("\nMerged 3-class GMM assignment:\n")
+print(class_summary)
+
+# --- Merged posterior: combine components 1+3 --------------------------------
+# For boundary extraction we need merged posteriors:
+#   P(rainfall) = P(comp_rain_low) + P(comp_rain_high)
+#   P(ROS)      = P(comp_ros)
+#   P(snowmelt) = P(comp_snowmelt)
+z <- fit$z  # n x 4 posterior matrix
+
+gmm_data <- gmm_data %>%
+  mutate(
+    post_rainfall = z[, comp_rain_low] + z[, comp_rain_high],
+    post_ros      = z[, comp_ros],
+    post_snowmelt = z[, comp_snowmelt]
+  )
+
+# --- Boundary extraction (merged posteriors) ---------------------------------
+# Snowmelt/ROS boundary: P(snowmelt) = P(ROS), evaluated at median SWE of
+#   snowmelt-classified events (flood_type_raw == "snowmelt")
+# ROS/rainfall boundary: P(ROS) = P(rainfall), evaluated at median SWE of
+#   rainfall-classified events (flood_type_raw == "rainfall")
+
+swe_snowmelt_med <- median(
+  gmm_data$swe_mean_mm[gmm_data$flood_type_raw == "snowmelt"], na.rm = TRUE)
+swe_rainfall_med <- median(
+  gmm_data$swe_mean_mm[gmm_data$flood_type_raw == "rainfall"], na.rm = TRUE)
+
+cat(sprintf(
+  "\nBoundary evaluation points:\n  Snowmelt/ROS  at SWE = %.2f mm (median snowmelt SWE)\n  ROS/Rainfall  at SWE = %.2f mm (median rainfall SWE)\n",
+  swe_snowmelt_med, swe_rainfall_med
+))
+
+# Function: evaluate merged posteriors across rain_frac grid at fixed SWE,
+# return equal-posterior crossing between two named classes
+find_merged_boundary <- function(fit, swe_mm_fixed,
+                                 comp_a_idx, comp_b_idx,
+                                 rain_frac_mean, rain_frac_sd,
+                                 swe_log_mean,   swe_log_sd,
+                                 swe_log_offset  = 1.0,
+                                 n_grid          = 5000) {
+  rf_grid    <- seq(0, 1, length.out = n_grid)
+  swe_log_f  <- log10(swe_mm_fixed + swe_log_offset)
+  rf_scaled  <- (rf_grid - rain_frac_mean) / rain_frac_sd
+  swe_scaled <- rep((swe_log_f - swe_log_mean) / swe_log_sd, n_grid)
+
+  grid_mat <- cbind(rf_scaled, swe_scaled)
+  z_grid   <- predict(fit, newdata = grid_mat)$z
+
+  # comp_a_idx / comp_b_idx may be vectors (merged classes)
+  post_a <- rowSums(z_grid[, comp_a_idx, drop = FALSE])
+  post_b <- rowSums(z_grid[, comp_b_idx, drop = FALSE])
+
+  diff_ab <- post_a - post_b
+  crossings <- which(diff(sign(diff_ab)) != 0)
+
+  if (length(crossings) == 0) {
+    warning("No equal-posterior crossing found in [0, 1] rain_frac range")
+    return(NA_real_)
+  }
+
+  # Take first crossing; interpolate
+  idx <- crossings[1]
+  rf_grid[idx] +
+    (rf_grid[idx + 1] - rf_grid[idx]) *
+    abs(diff_ab[idx]) / (abs(diff_ab[idx]) + abs(diff_ab[idx + 1]))
+}
+
+boundary_snow_ros <- find_merged_boundary(
+  fit, swe_snowmelt_med,
+  comp_a_idx = comp_snowmelt,
+  comp_b_idx = comp_ros,
+  rain_frac_mean, rain_frac_sd,
+  swe_log_mean,   swe_log_sd
+)
+
+boundary_ros_rain <- find_merged_boundary(
+  fit, swe_rainfall_med,
+  comp_a_idx = comp_ros,
+  comp_b_idx = c(comp_rain_low, comp_rain_high),
+  rain_frac_mean, rain_frac_sd,
+  swe_log_mean,   swe_log_sd
+)
+
+cat(sprintf(
+  "\nGMM-derived rain_frac boundaries (merged 3-class):\n  Snowmelt/ROS  : %.3f  (current SNOW_EM_THRESH = %.2f)\n  ROS/Rainfall  : %.3f  (current RAIN_EM_THRESH = %.2f)\n",
+  boundary_snow_ros, SNOW_EM_THRESH,
+  boundary_ros_rain, RAIN_EM_THRESH
+))
+
+# --- Ellipses for all 4 GMM components (for overlay) ------------------------
+ellipses_all <- map_dfr(seq_len(fit$G), function(g) {
+  mu    <- fit$parameters$mean[, g]
+  sigma <- fit$parameters$variance$sigma[, , g]
+  make_ellipse(mu, sigma) %>%
+    mutate(
+      gmm_component = g,
+      gmm_class     = case_when(
+        g %in% c(comp_rain_low, comp_rain_high) ~ "rainfall",
+        g == comp_ros                           ~ "ROS",
+        g == comp_snowmelt                      ~ "snowmelt"
+      )
+    )
+})
+
+# --- Color schemes -----------------------------------------------------------
+class_colors <- c(
+  "rainfall" = "#E07B39",
+  "ROS"      = "#6A9E6F",
+  "snowmelt" = "#5B8DB8"
+)
+
+type_colors_full <- c(
+  "rainfall"     = "#E07B39",
+  "ROS"          = "#6A9E6F",
+  "snowmelt"     = "#5B8DB8",
+  "unclassified" = "grey70"
+)
+
+# --- Shared plot elements ----------------------------------------------------
+boundary_lines <- list(
+  geom_vline(xintercept = boundary_snow_ros, linetype = "solid",
+             color = "black", linewidth = 0.6),
+  geom_vline(xintercept = boundary_ros_rain, linetype = "solid",
+             color = "black", linewidth = 0.6),
+  annotate("text", x = boundary_snow_ros, y = Inf,
+           label = sprintf("GMM\n%.3f", boundary_snow_ros),
+           hjust = 1.1, vjust = 1.2, size = 2.6, color = "black"),
+  annotate("text", x = boundary_ros_rain, y = Inf,
+           label = sprintf("GMM\n%.3f", boundary_ros_rain),
+           hjust = -0.1, vjust = 1.2, size = 2.6, color = "black"),
+  geom_vline(xintercept = SNOW_EM_THRESH, linetype = "dashed",
+             color = "grey40", linewidth = 0.45),
+  geom_vline(xintercept = RAIN_EM_THRESH, linetype = "dashed",
+             color = "grey40", linewidth = 0.45),
+  annotate("text", x = SNOW_EM_THRESH, y = -Inf,
+           label = sprintf("Cur.\n%.2f", SNOW_EM_THRESH),
+           hjust = 1.1, vjust = -0.2, size = 2.4, color = "grey40"),
+  annotate("text", x = RAIN_EM_THRESH, y = -Inf,
+           label = sprintf("Cur.\n%.2f", RAIN_EM_THRESH),
+           hjust = -0.1, vjust = -0.2, size = 2.4, color = "grey40")
+)
+
+shared_scales <- list(
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)),
+  scale_y_log10(),
+  annotation_logticks(sides = "l")
+)
+
+shared_theme <- theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+ellipse_overlay <- geom_path(
+  data        = ellipses_all,
+  aes(x       = rain_frac,
+      y       = swe_mm + SWE_LOG_OFFSET,
+      group   = gmm_component),
+  color       = "black",
+  linewidth   = 0.55,
+  linetype    = "solid",
+  inherit.aes = FALSE
+)
+
+# --- Panel A: GMM merged 3-class assignment ----------------------------------
+pA <- ggplot(gmm_data,
+             aes(x = rain_frac,
+                 y = swe_mean_mm + SWE_LOG_OFFSET,
+                 color = gmm_class)) +
+  geom_point(alpha = 0.25, size = 0.7) +
+  ellipse_overlay +
+  boundary_lines +
+  scale_color_manual(values = class_colors, name = "GMM class\n(merged)") +
+  shared_scales +
+  labs(
+    title = "A — GMM merged 3-class assignment",
+    x     = "Rain fraction",
+    y     = "Mean antecedent SWE + 1 (mm)"
+  ) +
+  shared_theme
+
+# --- Panel B: Current adaptive classification --------------------------------
+pB <- ggplot(gmm_data,
+             aes(x = rain_frac,
+                 y = swe_mean_mm + SWE_LOG_OFFSET,
+                 color = flood_type_raw)) +
+  geom_point(alpha = 0.25, size = 0.7) +
+  ellipse_overlay +
+  boundary_lines +
+  scale_color_manual(values = type_colors_full, name = "Flood type\n(current)") +
+  shared_scales +
+  labs(
+    title = "B — Current adaptive classification (flood_type_raw)",
+    x     = "Rain fraction",
+    y     = "Mean antecedent SWE + 1 (mm)"
+  ) +
+  shared_theme
+
+# --- Combine and save --------------------------------------------------------
+fig_final <- pA + pB +
+  plot_annotation(
+    title    = "GMM 3-class boundaries vs. current adaptive classification",
+    subtitle = sprintf(
+      "G=4 EEV, components %d+%d merged as rainfall | Snowmelt/ROS boundary: %.3f | ROS/Rainfall boundary: %.3f",
+      comp_rain_low, comp_rain_high, boundary_snow_ros, boundary_ros_rain
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 8.5, color = "grey40")
+    )
+  )
+
+ggsave(
+  file.path(diag_dir, "gmm_merged_3class_summary.png"),
+  plot = fig_final, width = 13, height = 5.5, dpi = 150
+)
+
+fig_final
+```
+
+```{r rainfall-fraction-thresholds-4}
+# =============================================================================
+# B2 Boundary Adjustment — ROS Class Recovery
+#
+# B1 (snowmelt/ROS) fixed: log10(SWE+1) = 0.4973 + 5.3433 * rain_frac
+# B2 intercept scaled by k: rain_frac = (0.1078 * k) + 0.3503 * log10(SWE+1)
+#
+# k=1.0 is the original GMM boundary. Increasing k shifts B2 toward higher
+# rain fraction, making it easier for events to be classified as ROS rather
+# than rainfall. B1 is held fixed throughout.
+#
+# Target: smallest k producing >= 20 sites with >= 20 ROS events AND
+#         >= 20 sites with >= 20 snowmelt events.
+# =============================================================================
+
+library(tidyverse)
+library(patchwork)
+
+# Pin commonly masked functions
+map     <- purrr::map
+map_dfr <- purrr::map_dfr
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation",
+                       "gmm_rain_frac_swe", "boundary_adjustment")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+SWE_LOG_OFFSET <- 1.0
+MIN_VIABLE     <- 20   # minimum sites with >= 20 events for FFA viability
+
+# B1 coefficients (fixed)
+B1_INTERCEPT <- 0.4973
+B1_SLOPE     <- 5.3433
+
+# B2 base coefficients (intercept scaled by k)
+B2_INTERCEPT_BASE <- 0.1078
+B2_SLOPE          <- 0.3503
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% unreg_sites,
+         !is.na(rain_frac), !is.na(swe_mean_mm)) %>%
+  mutate(log10_swe = log10(swe_mean_mm + SWE_LOG_OFFSET)) %>%
+  dplyr::select(site_no, peak_id, rain_frac, swe_mean_mm, log10_swe)
+
+cat(sprintf("Peaks available: %d across %d sites\n",
+            nrow(peaks), n_distinct(peaks$site_no)))
+
+# --- Old scheme counts for reference -----------------------------------------
+old_counts <- peaks %>%
+  left_join(adaptive %>% dplyr::select(site_no, peak_id, rain_frac),
+            by = c("site_no", "peak_id", "rain_frac")) %>%
+  mutate(old_class = case_when(
+    rain_frac >= 0.95 ~ "rainfall",
+    rain_frac <= 0.10 ~ "snowmelt",
+    TRUE              ~ "ROS"
+  ))
+
+old_total <- old_counts %>%
+  dplyr::count(old_class) %>%
+  tidyr::pivot_wider(names_from = old_class, values_from = n)
+
+old_viability <- old_counts %>%
+  dplyr::count(site_no, old_class) %>%
+  group_by(old_class) %>%
+  summarise(
+    n_sites_above_20 = sum(n >= MIN_VIABLE),
+    median_n         = median(n),
+    .groups          = "drop"
+  )
+
+cat("\nOld 0.10/0.95 scheme — total counts:\n")
+print(old_total)
+cat("\nOld 0.10/0.95 scheme — viability:\n")
+print(old_viability)
+
+# --- Classify under a given k ------------------------------------------------
+classify_k <- function(df, k) {
+  b2_int_k <- B2_INTERCEPT_BASE * k
+  df %>%
+    mutate(
+      log10_swe_b1 = B1_INTERCEPT + B1_SLOPE * rain_frac,
+      rain_frac_b2 = b2_int_k     + B2_SLOPE  * log10_swe,
+      class_k = case_when(
+        log10_swe > log10_swe_b1 ~ "snowmelt",
+        rain_frac < rain_frac_b2 ~ "ROS",
+        TRUE                     ~ "rainfall"
+      )
+    ) %>%
+    dplyr::select(-log10_swe_b1, -rain_frac_b2)
+}
+
+# --- Grid search over k ------------------------------------------------------
+k_seq <- seq(1.0, 5.0, by = 0.1)
+
+results <- purrr::map_dfr(k_seq, function(k) {
+  cl <- classify_k(peaks, k)
+
+  totals <- cl %>%
+    dplyr::count(class_k) %>%
+    tidyr::pivot_wider(names_from = class_k, values_from = n,
+                       values_fill = 0L)
+
+  viability <- cl %>%
+    dplyr::count(site_no, class_k) %>%
+    group_by(class_k) %>%
+    summarise(
+      n_sites_above_20 = sum(n >= MIN_VIABLE),
+      median_n         = median(n),
+      .groups          = "drop"
+    ) %>%
+    tidyr::pivot_wider(
+      names_from  = class_k,
+      values_from = c(n_sites_above_20, median_n),
+      names_glue  = "{.value}_{class_k}"
+    )
+
+  tibble(k = k) %>%
+    bind_cols(totals) %>%
+    bind_cols(viability)
+})
+
+# --- Find target k -----------------------------------------------------------
+target_k_row <- results %>%
+  filter(
+    n_sites_above_20_ROS      >= MIN_VIABLE,
+    n_sites_above_20_snowmelt >= MIN_VIABLE
+  ) %>%
+  slice_min(k, n = 1, with_ties = FALSE)
+
+if (nrow(target_k_row) == 0) {
+  cat("\nWARNING: No k in [1.0, 5.0] satisfies both viability criteria.\n")
+  cat("Reporting k with maximum ROS viability instead.\n")
+  target_k_row <- results %>% slice_max(n_sites_above_20_ROS, n = 1,
+                                         with_ties = FALSE)
+}
+
+target_k    <- target_k_row$k
+b2_int_k    <- B2_INTERCEPT_BASE * target_k
+
+cat(sprintf(
+  "\nTarget k: %.1f\n  B2(k): rain_frac = %.4f + %.4f * log10(SWE+1)\n",
+  target_k, b2_int_k, B2_SLOPE
+))
+
+# Summary table: k=1.0, target k, old scheme
+summary_tbl <- bind_rows(
+  results %>% filter(k == 1.0) %>%
+    mutate(scheme = "GMM k=1.0 (original)"),
+  target_k_row %>%
+    mutate(scheme = sprintf("GMM k=%.1f (target)", target_k)),
+  tibble(
+    k                         = NA_real_,
+    rainfall                  = old_total$rainfall,
+    snowmelt                  = old_total$snowmelt,
+    ROS                       = old_total$ROS,
+    n_sites_above_20_rainfall = old_viability$n_sites_above_20[old_viability$old_class == "rainfall"],
+    n_sites_above_20_snowmelt = old_viability$n_sites_above_20[old_viability$old_class == "snowmelt"],
+    n_sites_above_20_ROS      = old_viability$n_sites_above_20[old_viability$old_class == "ROS"],
+    median_n_rainfall         = old_viability$median_n[old_viability$old_class == "rainfall"],
+    median_n_snowmelt         = old_viability$median_n[old_viability$old_class == "snowmelt"],
+    median_n_ROS              = old_viability$median_n[old_viability$old_class == "ROS"],
+    scheme                    = "Old 0.10/0.95"
+  )
+) %>%
+  dplyr::select(scheme, k, rainfall, snowmelt, ROS,
+                n_sites_above_20_rainfall, n_sites_above_20_snowmelt,
+                n_sites_above_20_ROS,
+                median_n_rainfall, median_n_snowmelt, median_n_ROS)
+
+cat("\nComparison summary:\n")
+print(summary_tbl, width = Inf)
+
+# --- Shared theme ------------------------------------------------------------
+diag_theme <- theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+shared_k_x <- list(
+  scale_x_continuous(breaks = seq(1, 5, 0.5)),
+  labs(x = "Intercept multiplier k")
+)
+
+k1_vline <- geom_vline(xintercept = 1.0, linetype = "dashed",
+                       color = "grey50", linewidth = 0.45)
+kt_vline <- geom_vline(xintercept = target_k, linetype = "solid",
+                       color = "black", linewidth = 0.7)
+kt_label <- annotate("text", x = target_k, y = Inf,
+                     label = sprintf("k=%.1f", target_k),
+                     hjust = -0.1, vjust = 1.3, size = 2.8, color = "black")
+k1_label <- annotate("text", x = 1.0, y = Inf,
+                     label = "k=1.0\n(orig.)",
+                     hjust = -0.1, vjust = 1.3, size = 2.4, color = "grey50")
+
+# --- Figure 1: Site viability vs. k ------------------------------------------
+viability_long <- results %>%
+  dplyr::select(k, rainfall = n_sites_above_20_rainfall,
+                snowmelt = n_sites_above_20_snowmelt,
+                ROS      = n_sites_above_20_ROS) %>%
+  tidyr::pivot_longer(-k, names_to = "class", values_to = "n_sites")
+
+class_colors <- c("rainfall" = "#E07B39", "ROS" = "#6A9E6F",
+                  "snowmelt" = "#5B8DB8")
+
+p_viability <- ggplot(viability_long, aes(x = k, y = n_sites, color = class)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(yintercept = MIN_VIABLE, linetype = "dotted",
+             color = "black", linewidth = 0.5) +
+  annotate("text", x = 5.0, y = MIN_VIABLE,
+           label = sprintf("Min viable (%d)", MIN_VIABLE),
+           hjust = 1, vjust = -0.4, size = 2.6, color = "black") +
+  k1_vline + kt_vline + kt_label + k1_label +
+  scale_color_manual(values = class_colors, name = NULL) +
+  shared_k_x +
+  labs(
+    title    = "Sites with >= 20 events per class vs. k",
+    subtitle = sprintf("Target k=%.1f: first k where both ROS and snowmelt >= %d sites",
+                       target_k, MIN_VIABLE),
+    y        = sprintf("Sites with >= %d events", MIN_VIABLE)
+  ) +
+  diag_theme
+
+# --- Figure 2: Total class counts vs. k --------------------------------------
+counts_long <- results %>%
+  dplyr::select(k, rainfall, snowmelt, ROS) %>%
+  tidyr::pivot_longer(-k, names_to = "class", values_to = "count")
+
+old_ref <- tibble(
+  class = c("rainfall", "snowmelt", "ROS"),
+  ref   = c(as.integer(old_total$rainfall),
+            as.integer(old_total$snowmelt),
+            as.integer(old_total$ROS))
+)
+
+p_counts <- ggplot(counts_long, aes(x = k, y = count, color = class)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(data = old_ref, aes(yintercept = ref, color = class),
+             linetype = "dashed", linewidth = 0.45) +
+  k1_vline + kt_vline + kt_label + k1_label +
+  scale_color_manual(values = class_colors, name = NULL) +
+  shared_k_x +
+  labs(
+    title    = "Total event counts per class vs. k",
+    subtitle = "Dashed horizontals = old 0.10/0.95 scheme counts",
+    y        = "Total events"
+  ) +
+  diag_theme
+
+# --- Figure 3: Classification space at target k ------------------------------
+peaks_target <- classify_k(
+  adaptive %>%
+    distinct(site_no, peak_id, .keep_all = TRUE) %>%
+    filter(site_no %in% unreg_sites,
+           !is.na(rain_frac), !is.na(swe_mean_mm)) %>%
+    mutate(log10_swe = log10(swe_mean_mm + SWE_LOG_OFFSET)),
+  k = target_k
+)
+
+# B1 and B2(k) boundary lines
+rf_seq  <- seq(0, 1,    length.out = 500)
+swe_seq <- seq(-0.5, 3, length.out = 500)
+
+bnd1_plot <- tibble(
+  rain_frac = rf_seq,
+  swe_mm    = 10^(B1_INTERCEPT + B1_SLOPE * rf_seq) - SWE_LOG_OFFSET,
+  boundary  = "B1: Snowmelt/ROS"
+) %>% filter(swe_mm > 0)
+
+bnd2_plot <- tibble(
+  log10_swe = swe_seq,
+  rain_frac = (B2_INTERCEPT_BASE * target_k) + B2_SLOPE * swe_seq,
+  swe_mm    = 10^swe_seq - SWE_LOG_OFFSET,
+  boundary  = sprintf("B2(k=%.1f): ROS/Rainfall", target_k)
+) %>% filter(swe_mm > 0, rain_frac >= 0, rain_frac <= 1)
+
+bnd2_orig <- tibble(
+  log10_swe = swe_seq,
+  rain_frac = B2_INTERCEPT_BASE + B2_SLOPE * swe_seq,
+  swe_mm    = 10^swe_seq - SWE_LOG_OFFSET,
+  boundary  = "B2(k=1.0): original"
+) %>% filter(swe_mm > 0, rain_frac >= 0, rain_frac <= 1)
+
+bnd_lines <- bind_rows(bnd1_plot, bnd2_plot, bnd2_orig)
+
+p_classspace <- ggplot(
+  peaks_target,
+  aes(x = rain_frac, y = swe_mean_mm + SWE_LOG_OFFSET, color = class_k)
+) +
+  geom_point(alpha = 0.20, size = 0.7) +
+  geom_line(data = bnd_lines,
+            aes(x = rain_frac, y = swe_mm + SWE_LOG_OFFSET,
+                linetype = boundary),
+            color = "black", linewidth = 0.7, inherit.aes = FALSE) +
+  scale_color_manual(values = class_colors, name = "Class") +
+  scale_linetype_manual(
+    values = c("B1: Snowmelt/ROS"                       = "solid",
+               sprintf("B2(k=%.1f): ROS/Rainfall", target_k) = "dashed",
+               "B2(k=1.0): original"                    = "dotted"),
+    name = "Boundary"
+  ) +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  scale_y_log10() +
+  annotation_logticks(sides = "l") +
+  labs(
+    title    = sprintf("Classification space at target k=%.1f", target_k),
+    subtitle = sprintf(
+      "B2(k=%.1f): rain_frac = %.4f + %.4f * log10(SWE+1)",
+      target_k, B2_INTERCEPT_BASE * target_k, B2_SLOPE
+    ),
+    x = "Rain fraction",
+    y = "Mean antecedent SWE + 1 (mm)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+# --- Figure 4: Per-site ROS count distribution -------------------------------
+ros_target <- classify_k(peaks, target_k) %>%
+  filter(class_k == "ROS") %>%
+  dplyr::count(site_no) %>%
+  mutate(scheme = sprintf("GMM k=%.1f", target_k))
+
+ros_old <- old_counts %>%
+  filter(old_class == "ROS") %>%
+  dplyr::count(site_no) %>%
+  mutate(scheme = "Old 0.10/0.95")
+
+ros_both <- bind_rows(ros_target, ros_old) %>%
+  mutate(scheme = factor(scheme, levels = c("Old 0.10/0.95",
+                                             sprintf("GMM k=%.1f", target_k))))
+
+p_ros_dist <- ggplot(ros_both, aes(x = n, fill = scheme)) +
+  geom_histogram(bins = 20, alpha = 0.55, position = "identity",
+                 color = "white", linewidth = 0.2) +
+  geom_vline(xintercept = MIN_VIABLE, linetype = "dashed",
+             color = "black", linewidth = 0.5) +
+  annotate("text", x = MIN_VIABLE, y = Inf,
+           label = sprintf("Min viable\n(%d)", MIN_VIABLE),
+           hjust = -0.1, vjust = 1.3, size = 2.6) +
+  scale_fill_manual(
+    values = c("Old 0.10/0.95" = "grey60",
+               sprintf("GMM k=%.1f", target_k) = "#6A9E6F"),
+    name = NULL
+  ) +
+  labs(
+    title    = "Per-site ROS event count distribution",
+    subtitle = sprintf("Target k=%.1f vs. old 0.10/0.95 scheme", target_k),
+    x        = "ROS events per site",
+    y        = "Number of sites"
+  ) +
+  diag_theme
+
+# --- Save --------------------------------------------------------------------
+ggsave(file.path(diag_dir, "viability_vs_k.png"),
+       plot = p_viability,  width = 8,   height = 5,   dpi = 150)
+ggsave(file.path(diag_dir, "counts_vs_k.png"),
+       plot = p_counts,     width = 8,   height = 5,   dpi = 150)
+ggsave(file.path(diag_dir, "classspace_target_k.png"),
+       plot = p_classspace, width = 7,   height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "ros_site_distribution.png"),
+       plot = p_ros_dist,   width = 7,   height = 4.5, dpi = 150)
+
+fig_combined <- (p_viability + p_counts) / (p_classspace + p_ros_dist) +
+  plot_annotation(
+    title    = sprintf("B2 boundary adjustment — ROS class recovery (target k=%.1f)", target_k),
+    subtitle = sprintf(
+      "B1 fixed: log10(SWE+1) = %.4f + %.4f*rf  |  B2(k): rf = %.4f + %.4f*log10(SWE+1)",
+      B1_INTERCEPT, B1_SLOPE, B2_INTERCEPT_BASE * target_k, B2_SLOPE
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 13, face = "bold"),
+      plot.subtitle = element_text(size = 9,  color = "grey40")
+    )
+  )
+
+ggsave(file.path(diag_dir, "boundary_adjustment.png"),
+       plot = fig_combined, width = 14, height = 11, dpi = 150)
+
+fig_combined
+```
+
+```{r rainfall-fraction-thresholds-5}
+# =============================================================================
+# Equal-N Boundary Evaluation
+#
+# Tests whether dividing rain_frac into three equal thirds produces
+# physically reasonable boundaries — i.e., whether the 33rd and 67th
+# percentiles fall in the sparse middle region of the bimodal distribution
+# rather than cutting through either end-member mode.
+# =============================================================================
+
+library(tidyverse)
+library(patchwork)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+diag_dir  <- file.path(proj_root, "_diagnostics", "threshold_evaluation",
+                       "equal_n_boundaries")
+dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+MIN_VIABLE     <- 20
+SWE_LOG_OFFSET <- 1.0
+B1_INTERCEPT   <- 0.4973   # GMM snowmelt/ROS boundary (fixed)
+B1_SLOPE       <- 5.3433
+
+# Old scalar thresholds for comparison
+OLD_SNOW_THRESH <- 0.10
+OLD_RAIN_THRESH <- 0.95
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(site_no %in% unreg_sites, !is.na(rain_frac)) %>%
+  mutate(
+    log10_swe = log10(coalesce(swe_mean_mm, 0) + SWE_LOG_OFFSET)
+  ) %>%
+  dplyr::select(site_no, peak_id, rain_frac, swe_mean_mm, log10_swe)
+
+cat(sprintf("Peaks available: %d across %d sites\n",
+            nrow(peaks), n_distinct(peaks$site_no)))
+
+# --- Equal-n boundary identification -----------------------------------------
+lower_bnd <- quantile(peaks$rain_frac, 1/3)
+upper_bnd <- quantile(peaks$rain_frac, 2/3)
+
+cat(sprintf(
+  "\nEqual-n boundaries:\n  Lower (33rd pct): %.4f\n  Upper (67th pct): %.4f\n",
+  lower_bnd, upper_bnd
+))
+
+# Flag whether boundaries fall in sparse middle or cut through a mode
+# Estimate local density at each boundary
+dens       <- density(peaks$rain_frac, from = 0, to = 1, n = 1000)
+dens_df    <- tibble(x = dens$x, y = dens$y)
+dens_lower <- dens_df$y[which.min(abs(dens_df$x - lower_bnd))]
+dens_upper <- dens_df$y[which.min(abs(dens_df$x - upper_bnd))]
+dens_max   <- max(dens_df$y)
+
+cat(sprintf(
+  "\nDensity at boundaries (relative to max density = 1.0):\n  Lower boundary (%.4f): %.3f\n  Upper boundary (%.4f): %.3f\n",
+  lower_bnd, dens_lower / dens_max,
+  upper_bnd, dens_upper / dens_max
+))
+
+if (dens_lower / dens_max < 0.3 && dens_upper / dens_max < 0.3) {
+  cat("ASSESSMENT: Both boundaries fall in sparse region — physically reasonable.\n")
+} else if (dens_lower / dens_max >= 0.3 && dens_upper / dens_max >= 0.3) {
+  cat("ASSESSMENT: Both boundaries cut through dense regions — NOT physically reasonable.\n")
+} else {
+  cat(sprintf(
+    "ASSESSMENT: Mixed — lower boundary %s, upper boundary %s.\n",
+    if (dens_lower / dens_max < 0.3) "sparse (OK)" else "dense (problematic)",
+    if (dens_upper / dens_max < 0.3) "sparse (OK)" else "dense (problematic)"
+  ))
+}
+
+# --- Apply equal-n classification --------------------------------------------
+peaks <- peaks %>%
+  mutate(
+    class_equaln = case_when(
+      rain_frac <= lower_bnd ~ "snowmelt",
+      rain_frac >= upper_bnd ~ "rainfall",
+      TRUE                   ~ "ROS"
+    )
+  )
+
+# --- Viability: equal-n ------------------------------------------------------
+equaln_total <- peaks %>%
+  dplyr::count(class_equaln) %>%
+  tidyr::pivot_wider(names_from = class_equaln, values_from = n,
+                     values_fill = 0L)
+
+equaln_viability <- peaks %>%
+  dplyr::count(site_no, class_equaln) %>%
+  group_by(class_equaln) %>%
+  summarise(
+    n_sites_above_20 = sum(n >= MIN_VIABLE),
+    median_n         = median(n),
+    .groups          = "drop"
+  )
+
+cat("\nEqual-n classification — total counts:\n")
+print(equaln_total)
+cat("\nEqual-n classification — viability:\n")
+print(equaln_viability)
+
+# --- Viability: old scheme ---------------------------------------------------
+old_counts <- peaks %>%
+  mutate(class_old = case_when(
+    rain_frac >= OLD_RAIN_THRESH ~ "rainfall",
+    rain_frac <= OLD_SNOW_THRESH ~ "snowmelt",
+    TRUE                        ~ "ROS"
+  ))
+
+old_total <- old_counts %>%
+  dplyr::count(class_old) %>%
+  tidyr::pivot_wider(names_from = class_old, values_from = n,
+                     values_fill = 0L)
+
+old_viability <- old_counts %>%
+  dplyr::count(site_no, class_old) %>%
+  group_by(class_old) %>%
+  summarise(
+    n_sites_above_20 = sum(n >= MIN_VIABLE),
+    median_n         = median(n),
+    .groups          = "drop"
+  )
+
+cat("\nOld 0.10/0.95 scheme — total counts:\n")
+print(old_total)
+cat("\nOld 0.10/0.95 scheme — viability:\n")
+print(old_viability)
+
+# --- Colours -----------------------------------------------------------------
+class_colors <- c("rainfall" = "#E07B39", "ROS" = "#6A9E6F",
+                  "snowmelt" = "#5B8DB8")
+
+diag_theme <- theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+# --- Figure 1: Rain fraction distribution with boundaries --------------------
+n_total  <- nrow(peaks)
+n_snow   <- sum(peaks$class_equaln == "snowmelt")
+n_ros    <- sum(peaks$class_equaln == "ROS")
+n_rain   <- sum(peaks$class_equaln == "rainfall")
+
+p_dist <- ggplot(peaks, aes(x = rain_frac)) +
+  geom_histogram(bins = 80, fill = "steelblue", alpha = 0.45,
+                 color = "steelblue4", linewidth = 0.2) +
+  # Equal-n boundaries
+  geom_vline(xintercept = lower_bnd, color = "black",
+             linetype = "solid", linewidth = 0.8) +
+  geom_vline(xintercept = upper_bnd, color = "black",
+             linetype = "solid", linewidth = 0.8) +
+  # Old boundaries
+  geom_vline(xintercept = OLD_SNOW_THRESH, color = "grey50",
+             linetype = "dashed", linewidth = 0.5) +
+  geom_vline(xintercept = OLD_RAIN_THRESH, color = "grey50",
+             linetype = "dashed", linewidth = 0.5) +
+  # Zone fraction labels
+  annotate("text", x = lower_bnd / 2, y = Inf,
+           label = sprintf("Snowmelt\n%.1f%%", 100 * n_snow / n_total),
+           hjust = 0.5, vjust = 1.3, size = 3, color = "#5B8DB8") +
+  annotate("text", x = (lower_bnd + upper_bnd) / 2, y = Inf,
+           label = sprintf("ROS\n%.1f%%", 100 * n_ros / n_total),
+           hjust = 0.5, vjust = 1.3, size = 3, color = "#6A9E6F") +
+  annotate("text", x = (upper_bnd + 1) / 2, y = Inf,
+           label = sprintf("Rainfall\n%.1f%%", 100 * n_rain / n_total),
+           hjust = 0.5, vjust = 1.3, size = 3, color = "#E07B39") +
+  # Boundary labels
+  annotate("text", x = lower_bnd, y = Inf,
+           label = sprintf("Equal-n\n%.3f", lower_bnd),
+           hjust = -0.05, vjust = 2.8, size = 2.6, color = "black") +
+  annotate("text", x = upper_bnd, y = Inf,
+           label = sprintf("Equal-n\n%.3f", upper_bnd),
+           hjust = -0.05, vjust = 2.8, size = 2.6, color = "black") +
+  annotate("text", x = OLD_SNOW_THRESH, y = Inf,
+           label = sprintf("Old\n%.2f", OLD_SNOW_THRESH),
+           hjust = 1.1, vjust = 2.8, size = 2.4, color = "grey50") +
+  annotate("text", x = OLD_RAIN_THRESH, y = Inf,
+           label = sprintf("Old\n%.2f", OLD_RAIN_THRESH),
+           hjust = 1.1, vjust = 2.8, size = 2.4, color = "grey50") +
+  scale_x_continuous(breaks = seq(0, 1, 0.1)) +
+  labs(
+    title    = "Rain fraction distribution with equal-n and reference boundaries",
+    subtitle = sprintf(
+      "Equal-n: lower=%.4f, upper=%.4f | Density at boundaries: %.3f, %.3f (relative to max)",
+      lower_bnd, upper_bnd,
+      dens_lower / dens_max, dens_upper / dens_max
+    ),
+    x = "Rain fraction",
+    y = "Count"
+  ) +
+  diag_theme
+
+# --- Figure 2: rain_frac x SWE scatterplot with equal-n boundaries ----------
+# B1 GMM snowmelt/ROS boundary line for overlay
+rf_seq  <- seq(0, 1, length.out = 500)
+bnd1_df <- tibble(
+  rain_frac = rf_seq,
+  swe_mm    = 10^(B1_INTERCEPT + B1_SLOPE * rf_seq) - SWE_LOG_OFFSET
+) %>% filter(swe_mm > 0)
+
+peaks_swe <- peaks %>% filter(!is.na(swe_mean_mm))
+
+p_swe <- ggplot(peaks_swe,
+                aes(x = rain_frac,
+                    y = swe_mean_mm + SWE_LOG_OFFSET,
+                    color = class_equaln)) +
+  geom_point(alpha = 0.20, size = 0.7) +
+  # Equal-n vertical boundaries
+  geom_vline(xintercept = lower_bnd, color = "black",
+             linetype = "solid", linewidth = 0.7) +
+  geom_vline(xintercept = upper_bnd, color = "black",
+             linetype = "solid", linewidth = 0.7) +
+  # GMM B1 boundary
+  geom_line(data = bnd1_df,
+            aes(x = rain_frac, y = swe_mm + SWE_LOG_OFFSET),
+            color = "grey30", linetype = "dashed",
+            linewidth = 0.7, inherit.aes = FALSE) +
+  annotate("text", x = 0.02, y = Inf,
+           label = "GMM B1\n(snowmelt/ROS)",
+           hjust = 0, vjust = 1.3, size = 2.4, color = "grey30") +
+  scale_color_manual(values = class_colors, name = "Equal-n class") +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
+  scale_y_log10() +
+  annotation_logticks(sides = "l") +
+  labs(
+    title    = "rain_frac x SWE under equal-n classification",
+    subtitle = sprintf(
+      "Vertical lines = equal-n boundaries (%.4f, %.4f); dashed = GMM B1",
+      lower_bnd, upper_bnd
+    ),
+    x = "Rain fraction",
+    y = "Mean antecedent SWE + 1 (mm)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+# --- Figure 3: Per-site sample size distributions ----------------------------
+site_counts_equaln <- peaks %>%
+  dplyr::count(site_no, class_equaln) %>%
+  rename(class = class_equaln) %>%
+  mutate(scheme = "Equal-n")
+
+site_counts_old <- old_counts %>%
+  dplyr::count(site_no, class_old) %>%
+  rename(class = class_old) %>%
+  mutate(scheme = "Old 0.10/0.95")
+
+site_counts_both <- bind_rows(site_counts_equaln, site_counts_old) %>%
+  mutate(
+    scheme = factor(scheme, levels = c("Old 0.10/0.95", "Equal-n")),
+    class  = factor(class,  levels = c("rainfall", "ROS", "snowmelt"))
+  )
+
+p_sites <- ggplot(site_counts_both,
+                  aes(x = n, fill = scheme)) +
+  geom_histogram(bins = 20, alpha = 0.55, position = "identity",
+                 color = "white", linewidth = 0.2) +
+  geom_vline(xintercept = MIN_VIABLE, linetype = "dashed",
+             color = "black", linewidth = 0.5) +
+  facet_wrap(~ class, ncol = 3) +
+  scale_fill_manual(
+    values = c("Old 0.10/0.95" = "grey60", "Equal-n" = "steelblue"),
+    name   = NULL
+  ) +
+  labs(
+    title    = "Per-site event count distributions by class",
+    subtitle = sprintf("Dashed line = MIN_VIABLE (%d events)", MIN_VIABLE),
+    x        = "Events per site",
+    y        = "Number of sites"
+  ) +
+  diag_theme +
+  theme(legend.position = "top")
+
+# --- Save --------------------------------------------------------------------
+ggsave(file.path(diag_dir, "rain_frac_distribution.png"),
+       plot = p_dist,  width = 9,   height = 5,   dpi = 150)
+ggsave(file.path(diag_dir, "rain_frac_swe_equaln.png"),
+       plot = p_swe,   width = 7,   height = 5.5, dpi = 150)
+ggsave(file.path(diag_dir, "site_sample_sizes.png"),
+       plot = p_sites, width = 10,  height = 4.5, dpi = 150)
+
+fig_combined <- (p_dist + p_swe) / p_sites +
+  plot_annotation(
+    title    = "Equal-n boundary evaluation",
+    subtitle = sprintf(
+      "Lower boundary: %.4f (33rd pct) | Upper boundary: %.4f (67th pct) | Density at boundaries: %.3f, %.3f (rel. to max)",
+      lower_bnd, upper_bnd,
+      dens_lower / dens_max, dens_upper / dens_max
+    ),
+    theme = theme(
+      plot.title    = element_text(size = 13, face = "bold"),
+      plot.subtitle = element_text(size = 9,  color = "grey40")
+    )
+  )
+
+ggsave(file.path(diag_dir, "equal_n_evaluation.png"),
+       plot = fig_combined, width = 14, height = 10, dpi = 150)
+
+fig_combined
+```
+
+```{r rainfall-fraction-thresholds-6}
+# =============================================================================
+# Rain Fraction Threshold Justification — Publication Figure
+#
+# Clean single-panel density plot of rain_frac across all data-sufficient
+# POT peaks at unregulated sites, with vertical lines at the snowmelt (0.10)
+# and rainfall (0.95) end-member thresholds and shaded candidate zones.
+#
+# Output:
+#   _documentation/classification_decisions/rain_frac_threshold_justification.png
+# =============================================================================
+
+library(tidyverse)
+
+# --- Paths -------------------------------------------------------------------
+proj_root <- "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts/"
+data_dir  <- file.path(proj_root, "_data")
+out_dir   <- file.path(proj_root, "_documentation", "classification_decisions")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Constants ---------------------------------------------------------------
+SNOW_EM_THRESH <- 0.10
+RAIN_EM_THRESH <- 0.95
+
+# Candidate zone bounds (shaded regions around each threshold)
+SNOW_ZONE_MAX <- 0.20   # shade from 0 to this on the snowmelt side
+RAIN_ZONE_MIN <- 0.70   # shade from this to 1 on the rainfall side
+
+# --- Load data ---------------------------------------------------------------
+adaptive <- readRDS(file.path(data_dir, "pot_peaks_classified_adaptive.rds"))
+meta     <- readRDS(file.path(data_dir, "site_metadata.rds"))
+
+unreg_sites <- meta %>% filter(!regulated) %>% pull(site_no)
+
+peaks <- adaptive %>%
+  distinct(site_no, peak_id, .keep_all = TRUE) %>%
+  filter(
+    site_no %in% unreg_sites,
+    !is.na(rain_frac),
+    flood_type_raw != "unclassified"
+  )
+
+n_peaks <- nrow(peaks)
+n_sites <- n_distinct(peaks$site_no)
+
+cat(sprintf("Peaks included: %d across %d unregulated sites\n",
+            n_peaks, n_sites))
+
+# --- Figure ------------------------------------------------------------------
+p <- ggplot(peaks, aes(x = rain_frac)) +
+  # Shaded candidate zones
+  annotate("rect",
+           xmin = 0,             xmax = SNOW_ZONE_MAX,
+           ymin = -Inf,          ymax = Inf,
+           fill = "grey85",      alpha = 0.7) +
+  annotate("rect",
+           xmin = RAIN_ZONE_MIN, xmax = 1,
+           ymin = -Inf,          ymax = Inf,
+           fill = "grey85",      alpha = 0.7) +
+  # Density curve
+  geom_density(fill  = "#c0392b", alpha = 0.35,
+               color = "#c0392b", linewidth = 0.75) +
+  # Threshold lines
+  geom_vline(xintercept = SNOW_EM_THRESH,
+             linetype = "dashed", color = "grey20", linewidth = 0.75) +
+  geom_vline(xintercept = RAIN_EM_THRESH,
+             linetype = "dashed", color = "grey20", linewidth = 0.75) +
+  # Threshold labels
+  annotate("text",
+           x = SNOW_EM_THRESH - 0.01, y = Inf,
+           label = sprintf("Snowmelt threshold\n(\u03b1 = %.2f)", SNOW_EM_THRESH),
+           hjust = 1, vjust = 1.4, size = 3.2, color = "grey20") +
+  annotate("text",
+           x = RAIN_EM_THRESH + 0.01, y = Inf,
+           label = sprintf("Rainfall threshold\n(\u03b1 = %.2f)", RAIN_EM_THRESH),
+           hjust = 0, vjust = 1.4, size = 3.2, color = "grey20") +
+  # Class region labels
+  annotate("text",
+           x = SNOW_EM_THRESH / 2, y = 0.15,
+           label = "Snowmelt",
+           hjust = 0.5, size = 3.2, fontface = "italic", color = "grey30") +
+  annotate("text",
+           x = (SNOW_EM_THRESH + RAIN_EM_THRESH) / 2, y = 0.15,
+           label = "Rain-on-Snow",
+           hjust = 0.5, size = 3.2, fontface = "italic", color = "grey30") +
+  annotate("text",
+           x = RAIN_EM_THRESH + (1 - RAIN_EM_THRESH) / 2, y = 0.15,
+           label = "Rainfall",
+           hjust = 0.5, size = 3.2, fontface = "italic", color = "grey30") +
+  # Axes
+  scale_x_continuous(
+    breaks = c(0, 0.10, 0.25, 0.50, 0.75, 0.95, 1.0),
+    labels = c("0", "0.10", "0.25", "0.50", "0.75", "0.95", "1.0"),
+    limits = c(0, 1),
+    expand = c(0.01, 0)
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Rain fraction", y = "Density") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    axis.text.x        = element_text(size = 9),
+    plot.margin        = margin(8, 12, 8, 8)
+  )
+
+ggsave(
+  file.path(out_dir, "rain_frac_threshold_justification.png"),
+  plot  = p,
+  width = 7,
+  height = 4,
+  dpi   = 300
+)
+
+cat(sprintf("\nFigure saved to:\n  %s\n",
+            file.path(out_dir, "rain_frac_threshold_justification.png")))
+
+p
+
+# =============================================================================
+# Suggested figure caption (fill in n_peaks and n_sites from console output):
+#
+# "Figure X. Population-level distribution of rain fraction (rf) for all
+# data-sufficient peak-over-threshold events at unregulated Colorado GAGES-II
+# sites (n = [n_peaks] events, [n_sites] sites). Rain fraction is defined as
+# the ratio of accumulated rainfall flux to total hydrometeorological flux
+# (rainfall + snowmelt) over each event's basin-adaptive antecedent window.
+# The distribution is strongly bimodal, with modes near rf = 0 (snowmelt-
+# dominated events) and rf = 1 (rainfall-dominated events) separated by a
+# sparse intermediate region. Dashed vertical lines indicate the end-member
+# classification thresholds: events with rf <= 0.10 are classified as
+# snowmelt-driven, events with rf >= 0.95 are classified as rainfall-driven,
+# and intermediate events are classified as rain-on-snow. Shaded regions
+# indicate the candidate threshold ranges evaluated during sensitivity
+# analysis; both thresholds fall within low-density zones of the
+# distribution, indicating that the classification is robust to small
+# perturbations in threshold placement."
+# =============================================================================
+```
+
+# Updated classification and FFA results
+
+Note: Apply the newly determined thresholds (suspect flag, fixed depth thresholds, adaptive fraction thresholds) to the full peak record, rerun classification under both the fixed and adaptive pipelines, and refit all mixture distributions. Report changes in classification composition (fraction of events per flood type, fraction flagged as suspect) relative to the current implementation. Compare mixture FFA curves under old and new thresholds at the population level and for the demo site (09081600). This section is the payoff — it demonstrates that the threshold evaluation produced thresholds that are both methodologically justified and consequential for the FFA results.

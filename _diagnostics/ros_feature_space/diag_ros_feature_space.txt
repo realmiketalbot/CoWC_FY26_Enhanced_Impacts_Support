@@ -1,0 +1,39 @@
+=== ROS FEATURE SPACE DIAGNOSTIC SUMMARY ===
+Run date       : 2026-03-16
+Classified file: _data/pot_peaks_classified_adaptive.rds
+
+--- Population counts ---
+Total peaks                   : 21211
+With non-missing ros_flux_frac: 20644
+Interior events               : 8014 (37.8%)
+
+--- Current type breakdown (interior) ---
+# A tibble: 3 × 3
+  flood_type       n   pct
+  <fct>        <int> <dbl>
+1 ROS           4555  56.8
+2 mixed         2423  30.2
+3 unclassified  1036  12.9
+
+--- Dip test (within-site bimodality of ros_flux_frac) ---
+Eligible sites (unregulated, ≥ 20 interior peaks): 49
+  p < 0.10 : 8 sites (16.3%)
+  p < 0.05 : 6 sites (12.2%)
+  p < 0.01 : 4 sites (8.2%)
+
+Most bimodal sites:
+# A tibble: 10 × 4
+   site_no      n    dip   p_value
+   <chr>    <int>  <dbl>     <dbl>
+ 1 09024000    60 0.1    0.0000399
+ 2 09147000    57 0.0854 0.00190  
+ 3 09051050    42 0.0952 0.00315  
+ 4 09107000    34 0.101  0.00492  
+ 5 09032100    68 0.0662 0.0215   
+ 6 09036000    48 0.0729 0.0436   
+ 7 09035900    40 0.075  0.0709   
+ 8 07103990    23 0.0930 0.0893   
+ 9 09035700    42 0.0671 0.144    
+10 09067200    47 0.0638 0.146    
+
+Outputs written to: _diagnostics/ros_feature_space
