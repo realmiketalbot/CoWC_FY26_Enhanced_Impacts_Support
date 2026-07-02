@@ -230,7 +230,7 @@ classified <- classified %>%
 # Single-sample: largest m peaks, at most one per water year per site.
 # m = max(MIN_SINGLE_SAMPLE, number of unique water years at site).
 single_sample_ids <- classified %>%
-  dplyr::filter(flood_type != "unclassified") %>%
+  dplyr::filter(data_sufficient & !is.na(rain_frac)) %>%
   dplyr::group_by(site_no, water_year) %>%
   dplyr::slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
   dplyr::group_by(site_no) %>%
