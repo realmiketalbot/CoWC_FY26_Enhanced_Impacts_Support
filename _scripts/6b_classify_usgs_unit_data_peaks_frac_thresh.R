@@ -29,7 +29,7 @@
 # reproducibility.
 #
 # This script produces the 3-class output only. The 2-class output
-# (frac_thresh_2class: rainfall vs. non_rainfall) is derived in Script 7 as
+# (frac_thresh_2class: rainfall vs. snow_influenced) is derived in Script 7 as
 # a downstream remap.
 #
 # INPUTS:

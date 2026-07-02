@@ -92,22 +92,22 @@ message(sprintf("  Frac Thresh 3cls : %d peaks, %d sites",
 # METHOD REGISTRY
 # ============================================================================
 
-NON_RAINFALL_TYPES <- c("rain_on_snow", "snowmelt")
+SNOW_INFLUENCED_TYPES <- c("rain_on_snow", "snowmelt")
 
 remap_2class <- function(peaks) {
   # Remap using flood_type_raw (pre-demotion label) so that peaks individually
   # demoted to "unclassified" by MIN_TYPE_SAMPLE are still eligible for the
-  # pooled non_rainfall type. Peaks unclassified due to data insufficiency
+  # pooled snow_influenced type. Peaks unclassified due to data insufficiency
   # (flood_type_raw == "unclassified") remain unclassified.
   peaks %>%
     mutate(
       flood_type = case_when(
-        as.character(flood_type_raw) %in% NON_RAINFALL_TYPES ~ "non_rainfall",
+        as.character(flood_type_raw) %in% SNOW_INFLUENCED_TYPES ~ "snow_influenced",
         as.character(flood_type_raw) == "rainfall"           ~ "rainfall",
         TRUE                                                 ~ "unclassified"
       ),
       flood_type = factor(flood_type,
-                          levels = c("rainfall", "non_rainfall", "unclassified"))
+                          levels = c("rainfall", "snow_influenced", "unclassified"))
     )
 }
 
@@ -129,9 +129,9 @@ methods <- list(
 
   frac_thresh_2class = list(
     peaks        = peaks_frac,
-    types        = c("rainfall", "non_rainfall"),
+    types        = c("rainfall", "snow_influenced"),
     remap        = remap_2class,
-    pooled_types = "non_rainfall"
+    pooled_types = "snow_influenced"
   )
 
 )
@@ -252,7 +252,7 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
   # MIN_TYPE_SAMPLE demotion. Reflects what each method classifies each peak
   # as, independent of whether that type has enough peaks for FFA fitting.
   # For frac_thresh_2class the remap is applied to flood_type_raw so that
-  # snowmelt/rain_on_snow -> non_rainfall. Data-insufficient peaks have
+  # snowmelt/rain_on_snow -> snow_influenced. Data-insufficient peaks have
   # flood_type_raw == "unclassified" and remain so.
   total_peaks <- nrow(site_peaks)
 
@@ -260,7 +260,7 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
   # from the raw column directly rather than from the remapped flood_type
   composition_type <- if (!is.null(method_cfg$remap)) {
     dplyr::case_when(
-      as.character(site_peaks$flood_type_raw) %in% NON_RAINFALL_TYPES ~ "non_rainfall",
+      as.character(site_peaks$flood_type_raw) %in% SNOW_INFLUENCED_TYPES ~ "snow_influenced",
       as.character(site_peaks$flood_type_raw) == "rainfall"           ~ "rainfall",
       TRUE                                                            ~ "unclassified"
     )

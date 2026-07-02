@@ -11,8 +11,8 @@
 #
 #     depth_thresh       : Rainfall / Snowmelt / Rain-on-Snow (Davenport rules)
 #     frac_thresh_3class : Rainfall / Snowmelt / Rain-on-Snow (rain_frac split)
-#     frac_thresh_2class : Rainfall / Non-Rainfall (derived from 3-class peaks
-#                          by collapsing Snowmelt + Rain-on-Snow to Non-Rainfall)
+#     frac_thresh_2class : Rainfall / Snow-Influenced (derived from 3-class peaks
+#                          by collapsing Snowmelt + Rain-on-Snow to Snow-Influenced)
 #
 # METHODOLOGICAL CHOICES:
 #
@@ -89,7 +89,7 @@ MIN_TYPE_YEARS       <- 5L
 MK_ALPHA             <- 0.05
 
 # Per-method configuration. frac_thresh_2class derives from the 3-class peaks
-# by collapsing snowmelt + rain_on_snow to non_rainfall.
+# by collapsing snowmelt + rain_on_snow to snow_influenced.
 METHOD_CONFIGS <- list(
 
   depth_thresh = list(
@@ -117,9 +117,9 @@ METHOD_CONFIGS <- list(
   frac_thresh_2class = list(
     peaks_file   = "_data/pot_peaks_classified_frac_thresh_3class.rds",
     remap_2class = TRUE,
-    flood_types  = c("rainfall", "non_rainfall"),
-    type_colors  = c(rainfall = "#b2182b", non_rainfall = "#9970ab"),
-    type_labels  = c(rainfall = "Rainfall", non_rainfall = "Non-Rainfall"),
+    flood_types  = c("rainfall", "snow_influenced"),
+    type_colors  = c(rainfall = "#b2182b", snow_influenced = "#9970ab"),
+    type_labels  = c(rainfall = "Rainfall", snow_influenced = "Snow-Influenced"),
     method_label = "Rain fraction (2-class)"
   )
 )
@@ -236,19 +236,19 @@ for (method_key in names(METHOD_CONFIGS)) {
 
   peaks_raw <- readRDS(cfg$peaks_file)
 
-  # For frac_thresh_2class, remap snowmelt + rain_on_snow → non_rainfall
+  # For frac_thresh_2class, remap snowmelt + rain_on_snow → snow_influenced
   if (isTRUE(cfg$remap_2class)) {
     peaks_raw <- peaks_raw %>%
       dplyr::mutate(
         flood_type_raw = dplyr::case_when(
           as.character(flood_type_raw) == "rainfall"     ~ "rainfall",
           as.character(flood_type_raw) == "unclassified" ~ "unclassified",
-          TRUE                                           ~ "non_rainfall"
+          TRUE                                           ~ "snow_influenced"
         )
       )
     message(sprintf(
-      "  Remapped: snowmelt + rain_on_snow -> non_rainfall (%s peaks)",
-      format(sum(as.character(peaks_raw$flood_type_raw) == "non_rainfall"),
+      "  Remapped: snowmelt + rain_on_snow -> snow_influenced (%s peaks)",
+      format(sum(as.character(peaks_raw$flood_type_raw) == "snow_influenced"),
              big.mark = ",")
     ))
   }
@@ -942,7 +942,7 @@ for (method_key in names(METHOD_CONFIGS)) {
   message("  Saved: aggregate_trend_summary_table.png")
 
   ## ── VISUALIZATION 3: Top-6 proportion time series (last flood type) ────────
-  # For 3-class methods this is rain_on_snow; for 2-class it is non_rainfall.
+  # For 3-class methods this is rain_on_snow; for 2-class it is snow_influenced.
   focus_type  <- tail(cfg$flood_types, 1)
   focus_label <- cfg$type_labels[focus_type]
   focus_color <- cfg$type_colors[focus_type]
