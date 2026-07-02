@@ -39,6 +39,7 @@ dependencies:
   - conda-gcc-specs=14.3.0
   - curl=8.21.0
   - cxx-compiler=1.11.0
+  - expat=2.8.1
   - font-ttf-dejavu-sans-mono=2.37
   - font-ttf-inconsolata=3.000
   - font-ttf-source-code-pro=2.038
@@ -62,6 +63,7 @@ dependencies:
   - gfortran_linux-64=14.3.0
   - giflib=5.2.2
   - git=2.53.0
+  - glib=2.88.1
   - glog=0.7.1
   - glpk=5.0
   - gmp=6.3.0
@@ -169,6 +171,7 @@ dependencies:
   - packaging=26.0
   - pandoc=3.9
   - pango=1.56.4
+  - patchelf=0.17.2
   - pcre2=10.47
   - perl=5.32.1
   - pip=26.0.1

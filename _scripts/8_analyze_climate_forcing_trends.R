@@ -59,7 +59,7 @@
 required_pkgs <- c("tidyverse", "arrow", "Kendall", "trend", "sf",
                    "patchwork", "scales", "ggrepel", "maps")
 missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace,
-                                      quietly = TRUE, FUN.VALUE = logical(1L))]
+                                      quietly = FALSE, FUN.VALUE = logical(1L))]
 if (length(missing_pkgs) > 0L) {
   stop(
     "\nThe following packages are required but not installed:\n  ",
