@@ -1,4 +1,6 @@
-library(lmomco)
+## lmomco is called via `::` throughout (rather than library(lmomco) at the
+## top) so that scripts sourcing this file only for the shared utility
+## helpers below are not forced to have lmomco installed.
 
 ## ── GPD helpers (Yu et al. 2022 methodology) ─────────────────────────────────
 ##
@@ -25,7 +27,7 @@ fit_gpd <- function(x, dates, mu_threshold, min_n = 5) {
   y  <- sort(x - mu); y <- y[y >= 0]
   if (length(y) < min_n) return(NULL)
 
-  pars <- pargpa(lmoms(y))
+  pars <- lmomco::pargpa(lmomco::lmoms(y))
   if (is.null(pars$para) || anyNA(pars$para) || any(!is.finite(pars$para))) return(NULL)
   list(
     family  = "gpd",
@@ -117,7 +119,7 @@ fit_lp3 <- function(x, dates, min_n = 5) {
   if (n_years <= 0) return(NULL)
 
   lx   <- log(x)
-  pars <- parpe3(lmoms(lx))
+  pars <- lmomco::parpe3(lmomco::lmoms(lx))
   if (is.null(pars$para) || anyNA(pars$para) || any(!is.finite(pars$para))) return(NULL)
 
   list(
@@ -134,15 +136,15 @@ fit_lp3 <- function(x, dates, min_n = 5) {
 lp3_cdf <- function(x, fit) {
   x  <- pmax(x, 1e-6)
   lx <- log(x)
-  para <- vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
-  sapply(lx, function(v) cdfpe3(v, para))
+  para <- lmomco::vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
+  sapply(lx, function(v) lmomco::cdfpe3(v, para))
 }
 
 ## LP3 quantile: given AEP p, return discharge.
 ## p = annual exceedance probability, so non-exceedance F = 1 - p.
 lp3_quantile <- function(p, fit) {
-  para  <- vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
-  log_q <- quape3(1 - p, para)
+  para  <- lmomco::vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
+  log_q <- lmomco::quape3(1 - p, para)
   pmax(0, exp(log_q))
 }
 
@@ -227,4 +229,43 @@ empirical_ri <- function(peaks) {
       ri   = (n + 1) / rank
     ) %>%
     ungroup()
+}
+
+## ── Shared utility helpers (Scripts 6a, 6b, 8, 9) ─────────────────────────────
+
+## Water year: WY Y runs Oct 1 of (Y-1) through Sep 30 of Y.
+water_year <- function(d) {
+  yr <- as.integer(format(d, "%Y"))
+  mo <- as.integer(format(d, "%m"))
+  ifelse(mo >= 10L, yr + 1L, yr)
+}
+
+## Mann-Kendall trend test + Theil-Sen slope, NA-safe (drops NA before
+## testing; returns NA fields rather than erroring if a test fails or too
+## few points remain). Callers apply their own eligibility threshold to
+## n_years before trusting the result.
+mk_sens_test <- function(vals) {
+  vals_ok <- vals[!is.na(vals)]
+  mk_res  <- tryCatch(Kendall::MannKendall(vals_ok), error = function(e) NULL)
+  ss_res  <- tryCatch(trend::sens.slope(vals_ok),    error = function(e) NULL)
+  list(
+    n_years   = length(vals_ok),
+    tau       = if (!is.null(mk_res)) unname(mk_res$tau[1])    else NA_real_,
+    mk_pvalue = if (!is.null(mk_res)) unname(mk_res$sl[1])     else NA_real_,
+    sen_slope = if (!is.null(ss_res)) unname(ss_res$estimates) else NA_real_
+  )
+}
+
+## Pettitt change-point test, NA-safe. pettitt_index is the 1-based index of
+## the most probable change point WITHIN THE NA-STRIPPED SERIES — to map it
+## back to a label (e.g. a water year), apply the same `vals[!is.na(vals)]`
+## filter to the label vector before indexing, e.g.
+##   labels[!is.na(vals)][pettitt_index]
+pettitt_shift_test <- function(vals) {
+  vals_ok <- vals[!is.na(vals)]
+  pt_res  <- tryCatch(trend::pettitt.test(vals_ok), error = function(e) NULL)
+  list(
+    pettitt_pvalue = if (!is.null(pt_res)) unname(pt_res$p.value)     else NA_real_,
+    pettitt_index  = if (!is.null(pt_res)) unname(pt_res$estimate[1]) else NA_integer_
+  )
 }

@@ -129,13 +129,7 @@ SLOPE_COLORS <- c(positive = "#b2182b", negative = "#2166ac", zero = "#888888")
 ## ── Output directory ──────────────────────────────────────────────────────────
 if (!dir.exists(DIAG_DIR)) dir.create(DIAG_DIR, recursive = TRUE)
 
-## ── Water year helper ─────────────────────────────────────────────────────────
-# WY Y = Oct 1 of (Y-1) through Sep 30 of Y.
-water_year <- function(d) {
-  yr <- as.integer(format(d, "%Y"))
-  mo <- as.integer(format(d, "%m"))
-  ifelse(mo >= 10L, yr + 1L, yr)
-}
+## water_year() is defined in functions.R
 
 ## ── Safe max (avoids -Inf for all-NA groups) ──────────────────────────────────
 safe_max <- function(x) {
@@ -501,24 +495,22 @@ run_mk_sens <- function(site, variable, series_df) {
 
   vals     <- site_ts[[variable]]
   vals_ok  <- vals[!is.na(vals)]
-  n_series <- length(vals_ok)
 
-  if (n_series < MIN_YEARS_ELIGIBLE) return(NULL)
+  if (length(vals_ok) < MIN_YEARS_ELIGIBLE) return(NULL)
 
-  mk_res <- tryCatch(Kendall::MannKendall(vals_ok), error = function(e) NULL)
-  ss_res <- tryCatch(trend::sens.slope(vals_ok),    error = function(e) NULL)
+  mk <- mk_sens_test(vals_ok)
 
   # Store slopes at full precision; signif() is for display only.
   tibble::tibble(
     site_no       = site,
     variable      = variable,
-    n_years       = n_series,
+    n_years       = mk$n_years,
     series_mean   = mean(vals_ok),
     series_median = stats::median(vals_ok),
     series_sd     = stats::sd(vals_ok),
-    tau           = if (!is.null(mk_res)) unname(mk_res$tau[1])    else NA_real_,
-    p_value       = if (!is.null(mk_res)) unname(mk_res$sl[1])     else NA_real_,
-    sen_slope     = if (!is.null(ss_res)) unname(ss_res$estimates) else NA_real_
+    tau           = mk$tau,
+    p_value       = mk$mk_pvalue,
+    sen_slope     = mk$sen_slope
   )
 }
 

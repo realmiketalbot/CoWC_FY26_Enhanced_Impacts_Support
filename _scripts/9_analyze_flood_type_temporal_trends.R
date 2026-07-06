@@ -45,6 +45,7 @@
 # INPUTS:
 #   _data/pot_peaks_classified_depth_thresh.rds   (Script 6a)
 #   _data/pot_peaks_classified_frac_thresh_3class.rds (Script 6b)
+#   _data/pot_peaks_all.rds                       (Script 3, AM peak-flow series)
 #   _data/site_metadata.rds                       (Script 0)
 #   _data/station_spatial.rds                     (Script 1)
 #   functions.R
@@ -57,8 +58,18 @@
 # OUTPUTS (AM analysis, per method):
 #   _data/annual_am_type_{method}.rds         one row per site x WY (AM peak type)
 #   _data/am_type_shift_{method}.rds          first- vs. second-half AM type frequency
-#   _data/temporal_trends_am_{method}.rds     list(am_type_shift, am_type_indicator_trends)
+#   _data/temporal_trends_am_{method}.rds     list(am_type_shift, am_type_indicator_trends,
+#                                             am_peak_flow_trends)
 #                                             [frac_thresh_3class also includes am_rain_frac_trends]
+#
+# OUTPUTS (AM peak-flow stationarity, classification-independent, computed once):
+#   _data/annual_am_peakflow.rds               one row per site x WY (true AM peak flow)
+#   am_peak_flow_trends is identical across all three temporal_trends_am_{method}.rds
+#   files above — it does not depend on flood-type classification, but is
+#   duplicated into each per-method file so the app can load it the same way
+#   it loads the other AM results.
+#   _diagnostics/temporal_trends/am_peakflow_trend_map.png
+#   _diagnostics/temporal_trends/am_peakflow_top{N}_slopes.png
 #
 # Author : Mike Talbot, PhD Student, Colorado State University
 # Date   : 2026-05-21
@@ -156,6 +167,258 @@ if ("regulated" %in% names(meta)) {
   stop("'regulated' column not found in site_metadata.rds.")
 }
 
+## ═══════════════════════════════════════════════════════════════════════════════
+## AM PEAK-FLOW STATIONARITY (classification-independent, computed once)
+## ═══════════════════════════════════════════════════════════════════════════════
+# The annual maximum (AM) peak-flow value at a site does not depend on flood-
+# type classification, so it is computed once here from the raw POT peak
+# catalog, rather than once per classification method (which would exclude a
+# site's true AM peak whenever that peak happened to be "unclassified" under
+# a given method's completeness rule). Duplicated into every method's
+# temporal_trends_am_{method}.rds output for a consistent access pattern.
+message(sprintf("\n%s\n=== AM PEAK-FLOW STATIONARITY (classification-independent) ===\n%s",
+                strrep("=", 60), strrep("=", 60)))
+
+# water_year() is defined in functions.R
+
+message("Building AM peak-flow series...")
+
+annual_am_peakflow <- readRDS("_data/pot_peaks_all.rds") %>%
+  dplyr::distinct(site_no, peak_id, peak_date, peak_flow) %>%
+  dplyr::mutate(peak_date  = as.Date(peak_date),
+                water_year = water_year(peak_date)) %>%
+  dplyr::group_by(site_no, water_year) %>%
+  dplyr::slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
+  dplyr::ungroup() %>%
+  dplyr::left_join(reg_lookup, by = "site_no") %>%
+  dplyr::arrange(site_no, water_year)
+
+message(sprintf("  AM peak-flow series: %d site-year rows | %d sites",
+                nrow(annual_am_peakflow), dplyr::n_distinct(annual_am_peakflow$site_no)))
+
+saveRDS(annual_am_peakflow, "_data/annual_am_peakflow.rds")
+message("  Saved: _data/annual_am_peakflow.rds")
+
+am_peakflow_eligible_sites <- annual_am_peakflow %>%
+  dplyr::group_by(site_no) %>%
+  dplyr::summarise(n_am_yrs  = dplyr::n(),
+                    regulated = dplyr::first(regulated),
+                    .groups   = "drop") %>%
+  dplyr::filter(n_am_yrs >= MIN_CLASSIFIED_YEARS)
+
+message(sprintf("  Eligible sites (>=%d AM years): %d",
+                MIN_CLASSIFIED_YEARS, nrow(am_peakflow_eligible_sites)))
+
+# Mann-Kendall trend + Theil-Sen slope test for a monotonic trend, plus a
+# Pettitt test for a single abrupt shift (e.g. a dam coming online mid-record)
+# that a monotonic trend test would not be well-suited to detect.
+run_am_peakflow_stationarity <- function(site, regulated_flag) {
+  site_ts  <- dplyr::filter(annual_am_peakflow, site_no == site) %>%
+    dplyr::arrange(water_year)
+  vals     <- site_ts$peak_flow
+  if (length(vals) < MIN_CLASSIFIED_YEARS) return(NULL)
+
+  mk <- mk_sens_test(vals)
+  pt <- pettitt_shift_test(vals)
+
+  # pt$pettitt_index is 1-based within the NA-stripped series; peak_flow has
+  # no NAs here, so it indexes site_ts$water_year directly.
+  pt_wy <- if (!is.na(pt$pettitt_index)) site_ts$water_year[pt$pettitt_index] else NA_integer_
+
+  tibble::tibble(
+    site_no           = site,
+    n_years           = mk$n_years,
+    regulated         = regulated_flag,
+    tau               = mk$tau,
+    mk_pvalue         = mk$mk_pvalue,
+    sen_slope         = mk$sen_slope,
+    pettitt_pvalue    = pt$pettitt_pvalue,
+    pettitt_change_wy = pt_wy
+  )
+}
+
+message("\nRunning MK + Theil-Sen + Pettitt stationarity tests on AM peak flow...")
+
+am_peak_flow_trends <- purrr::map2_dfr(
+  am_peakflow_eligible_sites$site_no,
+  am_peakflow_eligible_sites$regulated,
+  run_am_peakflow_stationarity
+) %>%
+  dplyr::mutate(
+    significant         = !is.na(mk_pvalue)      & mk_pvalue      < MK_ALPHA,
+    sig_positive         = significant & !is.na(sen_slope) & sen_slope > 0,
+    sig_negative         = significant & !is.na(sen_slope) & sen_slope < 0,
+    pettitt_significant  = !is.na(pettitt_pvalue) & pettitt_pvalue < MK_ALPHA
+  ) %>%
+  dplyr::arrange(site_no)
+
+message(sprintf("  AM peak-flow stationarity tests complete: %d sites",
+                nrow(am_peak_flow_trends)))
+
+am_pf_mk_binom <- tryCatch(
+  binom.test(sum(am_peak_flow_trends$significant, na.rm = TRUE),
+             nrow(am_peak_flow_trends), p = MK_ALPHA)$p.value,
+  error = function(e) NA_real_
+)
+am_pf_pettitt_binom <- tryCatch(
+  binom.test(sum(am_peak_flow_trends$pettitt_significant, na.rm = TRUE),
+             nrow(am_peak_flow_trends), p = MK_ALPHA)$p.value,
+  error = function(e) NA_real_
+)
+
+message(sprintf(
+  "  MK trend      : %d / %d sites significant (%.0f%%) [binom p = %.3f vs. %.0f%% null]",
+  sum(am_peak_flow_trends$significant, na.rm = TRUE), nrow(am_peak_flow_trends),
+  100 * mean(am_peak_flow_trends$significant, na.rm = TRUE),
+  am_pf_mk_binom, 100 * MK_ALPHA
+))
+message(sprintf(
+  "  Pettitt shift : %d / %d sites significant (%.0f%%) [binom p = %.3f vs. %.0f%% null]",
+  sum(am_peak_flow_trends$pettitt_significant, na.rm = TRUE), nrow(am_peak_flow_trends),
+  100 * mean(am_peak_flow_trends$pettitt_significant, na.rm = TRUE),
+  am_pf_pettitt_binom, 100 * MK_ALPHA
+))
+
+## ── DIAGNOSTIC: AM peak-flow stationarity map ────────────────────────────────
+message("\nGenerating: AM peak-flow stationarity map...")
+
+am_pf_sp <- am_peak_flow_trends %>%
+  dplyr::left_join(spatial_pts, by = "site_no") %>%
+  dplyr::filter(!is.na(lon), !is.na(lat)) %>%
+  dplyr::mutate(
+    slope_dir = dplyr::case_when(
+      sen_slope > 0 ~ "positive",
+      sen_slope < 0 ~ "negative",
+      TRUE          ~ "zero"
+    )
+  )
+
+pf_slope_colors <- c(positive = "#b2182b", negative = "#2166ac", zero = "#888888")
+
+p_am_pf_map <- ggplot2::ggplot() +
+  ggplot2::geom_polygon(
+    data = co_poly, ggplot2::aes(x = long, y = lat, group = group),
+    fill = "grey93", colour = "grey55", linewidth = 0.3
+  ) +
+  ggplot2::geom_point(
+    data = dplyr::filter(am_pf_sp, !significant),
+    ggplot2::aes(x = lon, y = lat, colour = slope_dir),
+    shape = 0, size = 2, stroke = 0.9, alpha = 0.75
+  ) +
+  ggplot2::geom_point(
+    data = dplyr::filter(am_pf_sp, significant),
+    ggplot2::aes(x = lon, y = lat, colour = slope_dir),
+    shape = 15, size = 2.5
+  ) +
+  ggplot2::geom_point(
+    data = dplyr::filter(am_pf_sp, pettitt_significant),
+    ggplot2::aes(x = lon, y = lat),
+    shape = 1, size = 4.5, colour = "black", stroke = 1
+  ) +
+  ggplot2::scale_colour_manual(
+    values = pf_slope_colors,
+    labels = c(positive = "Positive slope", negative = "Negative slope",
+               zero = "≈Zero"),
+    name   = "Sen slope\ndirection",
+    drop   = FALSE
+  ) +
+  ggplot2::coord_fixed(
+    ratio = 1.3,
+    xlim  = range(co_poly$long, na.rm = TRUE),
+    ylim  = range(co_poly$lat,  na.rm = TRUE)
+  ) +
+  ggplot2::labs(
+    title    = "AM peak-flow stationarity — Mann-Kendall trend + Pettitt shift",
+    subtitle = sprintf(
+      "n = %d eligible sites; ■ = MK sig. (p < %.2f), □ = not sig.; black ring = sig. Pettitt shift",
+      nrow(am_pf_sp), MK_ALPHA
+    ),
+    x = NULL, y = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 9) +
+  ggplot2::theme(
+    legend.position  = "bottom",
+    legend.key.size  = ggplot2::unit(0.4, "cm"),
+    axis.text        = ggplot2::element_blank(),
+    axis.ticks       = ggplot2::element_blank(),
+    panel.grid.major = ggplot2::element_line(colour = "grey88", linewidth = 0.2)
+  )
+
+ggplot2::ggsave(
+  file.path(diag_dir, "am_peakflow_trend_map.png"),
+  p_am_pf_map, width = 7, height = 7, dpi = 150
+)
+message("  Saved: am_peakflow_trend_map.png")
+
+## ── DIAGNOSTIC: Top-6 AM peak-flow series by |Sen slope| ─────────────────────
+top_pf_sites <- am_peak_flow_trends %>%
+  dplyr::filter(!is.na(sen_slope), !is.na(tau)) %>%
+  dplyr::slice_max(abs(sen_slope), n = 6, with_ties = FALSE) %>%
+  dplyr::pull(site_no)
+
+n_top_pf <- length(top_pf_sites)
+if (n_top_pf == 0L) {
+  message("  NOTE: no eligible AM peak-flow sites — skipping top-slopes figure.")
+} else {
+
+  pf_trend_meta <- am_peak_flow_trends %>%
+    dplyr::filter(site_no %in% top_pf_sites) %>%
+    dplyr::select(site_no, tau, mk_pvalue, sen_slope,
+                  pettitt_change_wy, pettitt_significant)
+
+  pf_ts_df <- annual_am_peakflow %>%
+    dplyr::filter(site_no %in% top_pf_sites) %>%
+    dplyr::left_join(pf_trend_meta, by = "site_no") %>%
+    dplyr::mutate(
+      panel_label = sprintf("%s\nτ = %.2f, slope = %.1f cfs/yr, p = %.3f",
+                            site_no, tau, sen_slope, mk_pvalue)
+    )
+
+  pf_sen_lines <- pf_ts_df %>%
+    dplyr::group_by(site_no, panel_label, sen_slope) %>%
+    dplyr::summarise(
+      wy_min    = min(water_year),
+      wy_max    = max(water_year),
+      intercept = stats::median(peak_flow - sen_slope * water_year, na.rm = TRUE),
+      .groups   = "drop"
+    ) %>%
+    dplyr::mutate(y_start = intercept + sen_slope * wy_min,
+                  y_end   = intercept + sen_slope * wy_max)
+
+  pf_shift_lines <- pf_ts_df %>%
+    dplyr::filter(pettitt_significant) %>%
+    dplyr::distinct(site_no, panel_label, pettitt_change_wy)
+
+  p_top_pf <- ggplot2::ggplot(pf_ts_df, ggplot2::aes(x = water_year, y = peak_flow)) +
+    ggplot2::geom_col(fill = "#4393c3", alpha = 0.65, width = 0.8) +
+    ggplot2::geom_segment(
+      data = pf_sen_lines,
+      ggplot2::aes(x = wy_min, xend = wy_max, y = y_start, yend = y_end),
+      colour = "grey15", linewidth = 1.1, inherit.aes = FALSE
+    ) +
+    ggplot2::geom_vline(
+      data = pf_shift_lines,
+      ggplot2::aes(xintercept = pettitt_change_wy),
+      colour = "#d6604d", linetype = "dashed", linewidth = 0.9
+    ) +
+    ggplot2::facet_wrap(~panel_label, ncol = 3, scales = "free_y") +
+    ggplot2::scale_x_continuous(breaks = seq(1990, 2025, 10)) +
+    ggplot2::labs(
+      title    = sprintf("Top %d sites by |Sen slope| — AM peak flow", n_top_pf),
+      subtitle = "Bar: annual max peak flow; solid line: Theil-Sen slope; dashed red line: significant Pettitt change point",
+      x = "Water year", y = "Peak flow (cfs)"
+    ) +
+    ggplot2::theme_minimal(base_size = 10) +
+    ggplot2::theme(strip.text    = ggplot2::element_text(size = 7),
+                   panel.spacing = ggplot2::unit(0.9, "lines"))
+
+  ggplot2::ggsave(
+    file.path(diag_dir, sprintf("am_peakflow_top%d_slopes.png", n_top_pf)),
+    p_top_pf, width = 14, height = 8, dpi = 150
+  )
+  message(sprintf("  Saved: am_peakflow_top%d_slopes.png", n_top_pf))
+}
+
 ## ── Shared helper: Mann-Kendall + Theil-Sen trend tests ──────────────────────
 run_trend_tests <- function(site, ftype, regulated_flag, annual_ts_data) {
 
@@ -169,20 +432,19 @@ run_trend_tests <- function(site, ftype, regulated_flag, annual_ts_data) {
 
   run_one <- function(series, metric_label) {
     series_clean <- series[!is.na(series)]
-    mk_res <- tryCatch(Kendall::MannKendall(series_clean), error = function(e) NULL)
-    ss_res <- tryCatch(trend::sens.slope(series_clean),    error = function(e) NULL)
+    mk <- mk_sens_test(series_clean)
     tibble::tibble(
       site_no    = site,
       flood_type = ftype,
       metric     = metric_label,
       regulated  = regulated_flag,
-      n_years    = length(series_clean),
+      n_years    = mk$n_years,
       n_nonzero  = sum(series_clean > 0, na.rm = TRUE),
       mean_val   = mean(series_clean, na.rm = TRUE),
       sd_val     = sd(series_clean,   na.rm = TRUE),
-      tau        = if (!is.null(mk_res)) unname(mk_res$tau[1])    else NA_real_,
-      mk_pvalue  = if (!is.null(mk_res)) unname(mk_res$sl[1])     else NA_real_,
-      sen_slope  = if (!is.null(ss_res)) unname(ss_res$estimates) else NA_real_
+      tau        = mk$tau,
+      mk_pvalue  = mk$mk_pvalue,
+      sen_slope  = mk$sen_slope
     )
   }
 
@@ -526,18 +788,15 @@ for (method_key in names(METHOD_CONFIGS)) {
     run_mk_am <- function(site, regulated_flag) {
       site_ts  <- dplyr::filter(annual_am_type, site_no == site) %>%
         dplyr::arrange(water_year)
-      vals     <- site_ts$am_rain_frac
-      vals_ok  <- vals[!is.na(vals)]
-      n_series <- length(vals_ok)
-      if (n_series < MIN_CLASSIFIED_YEARS) return(NULL)
-      mk_res <- tryCatch(Kendall::MannKendall(vals_ok), error = function(e) NULL)
-      ss_res <- tryCatch(trend::sens.slope(vals_ok),    error = function(e) NULL)
+      vals_ok  <- site_ts$am_rain_frac[!is.na(site_ts$am_rain_frac)]
+      if (length(vals_ok) < MIN_CLASSIFIED_YEARS) return(NULL)
+      mk <- mk_sens_test(vals_ok)
       tibble::tibble(
         site_no   = site,
-        n_years   = n_series,
-        tau       = if (!is.null(mk_res)) unname(mk_res$tau[1])    else NA_real_,
-        p_value   = if (!is.null(mk_res)) unname(mk_res$sl[1])     else NA_real_,
-        sen_slope = if (!is.null(ss_res)) unname(ss_res$estimates) else NA_real_,
+        n_years   = mk$n_years,
+        tau       = mk$tau,
+        p_value   = mk$mk_pvalue,
+        sen_slope = mk$sen_slope,
         regulated = regulated_flag
       )
     }
@@ -599,19 +858,17 @@ for (method_key in names(METHOD_CONFIGS)) {
       dplyr::arrange(water_year)
     indicator <- as.integer(!is.na(site_ts$am_flood_type) &
                               site_ts$am_flood_type == ftype)
-    n_series  <- length(indicator)
-    if (n_series < MIN_CLASSIFIED_YEARS) return(NULL)
-    mk_res <- tryCatch(Kendall::MannKendall(indicator), error = function(e) NULL)
-    ss_res <- tryCatch(trend::sens.slope(indicator),    error = function(e) NULL)
+    if (length(indicator) < MIN_CLASSIFIED_YEARS) return(NULL)
+    mk <- mk_sens_test(indicator)
     tibble::tibble(
       site_no      = site,
       flood_type   = ftype,
       regulated    = regulated_flag,
-      n_years      = n_series,
+      n_years      = mk$n_years,
       n_type_years = sum(indicator),
-      tau          = if (!is.null(mk_res)) unname(mk_res$tau[1])    else NA_real_,
-      p_value      = if (!is.null(mk_res)) unname(mk_res$sl[1])     else NA_real_,
-      sen_slope    = if (!is.null(ss_res)) unname(ss_res$estimates) else NA_real_
+      tau          = mk$tau,
+      p_value      = mk$mk_pvalue,
+      sen_slope    = mk$sen_slope
     )
   }
 
@@ -662,9 +919,13 @@ for (method_key in names(METHOD_CONFIGS)) {
   }
 
   ## 4. Save combined AM analysis output (all methods) ─────────────────────────
+  # am_peak_flow_trends is classification-independent (computed once above)
+  # and is identical across all three method outputs; duplicated here so the
+  # app can load it via the same per-method access pattern as the other keys.
   am_output <- list(
     am_type_shift            = am_type_shift,
-    am_type_indicator_trends = am_type_indicator_trends
+    am_type_indicator_trends = am_type_indicator_trends,
+    am_peak_flow_trends      = am_peak_flow_trends
   )
 
   if (method_key == "frac_thresh_3class") {
@@ -1037,4 +1298,8 @@ for (mk in names(METHOD_CONFIGS)) {
   message(sprintf("    _data/am_type_shift_%s.rds", mk))
 }
 message("  Note: am_rain_frac_trends included only in temporal_trends_am_frac_thresh_3class.rds")
+message("  AM peak-flow stationarity (classification-independent, computed once):")
+message("    _data/annual_am_peakflow.rds")
+message("    am_peak_flow_trends duplicated into all temporal_trends_am_{method}.rds files above")
 message("  Diagnostic figures: _diagnostics/temporal_trends/{method}/")
+message("  Diagnostic figures (AM peak-flow, shared): _diagnostics/temporal_trends/am_peakflow_*.png")

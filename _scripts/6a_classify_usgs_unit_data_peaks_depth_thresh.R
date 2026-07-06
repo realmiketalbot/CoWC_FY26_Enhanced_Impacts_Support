@@ -47,6 +47,8 @@
 
 library(tidyverse)
 
+source("functions.R")
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -151,11 +153,7 @@ message(sprintf("\nTotal peaks: %d | Sites: %d",
 # ============================================================================
 message("\nApplying Yu et al. (2022) top-n peak selection...")
 
-water_year <- function(d) {
-  yr <- as.integer(format(d, "%Y"))
-  mo <- as.integer(format(d, "%m"))
-  ifelse(mo >= 10L, yr + 1L, yr)
-}
+# water_year() is defined in functions.R
 
 classified <- classified %>%
   mutate(water_year = water_year(peak_date))
