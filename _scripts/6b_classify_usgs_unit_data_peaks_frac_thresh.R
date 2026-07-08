@@ -225,7 +225,8 @@ message("\nApplying Yu et al. (2022) top-n peak selection...")
 classified <- classified %>%
   dplyr::mutate(water_year = water_year(peak_date))
 
-# Single-sample: largest m peaks, at most one per water year per site.
+# Single-sample: largest m independent peaks per site, ranked directly by
+# peak flow with no per-water-year cap.
 # m = max(MIN_SINGLE_SAMPLE, number of unique water years at site).
 single_sample_ids <- classified %>%
   dplyr::filter(data_sufficient & !is.na(rain_frac)) %>%
@@ -237,7 +238,8 @@ single_sample_ids <- classified %>%
   dplyr::select(site_no, peak_id) %>%
   dplyr::mutate(in_single_sample = TRUE)
 
-# Per-type: largest n peaks, at most one per water year per (site, type).
+# Per-type: largest n independent peaks per (site, type), ranked directly by
+# peak flow with no per-water-year cap.
 # Types with fewer than MIN_TYPE_SAMPLE events at a site are dropped entirely.
 type_sample_ids <- classified %>%
   dplyr::filter(flood_type != "unclassified") %>%

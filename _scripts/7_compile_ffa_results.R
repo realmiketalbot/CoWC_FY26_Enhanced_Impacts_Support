@@ -302,7 +302,7 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
   } else NULL
 
   # ── Build per-type fit samples ────────────────────────────────────────────
-  # For pooled types, re-derive top-n from merged pool (one per water year).
+  # For pooled types, re-derive top-n independent peaks from the merged pool.
   # For standard types, use the pre-computed in_type_sample flag.
   get_sample <- function(typ) {
     if (!is.null(pooled_types) && typ %in% pooled_types) {
@@ -310,8 +310,7 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
         filter(flood_type == typ) %>%
         mutate(n    = pmax(MIN_TYPE_SAMPLE, n_distinct(water_year)),
                rank = row_number(desc(peak_flow))) %>%
-        filter(rank <= n) %>%
-        ungroup()
+        filter(rank <= n)
     } else {
       site_peaks %>% filter(flood_type == typ, in_type_sample)
     }

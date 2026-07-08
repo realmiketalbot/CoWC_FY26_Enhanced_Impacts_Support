@@ -25,10 +25,10 @@
 #   - Per-type selection and demotion applied first; types with fewer than
 #     MIN_TYPE_SAMPLE events are demoted to "unclassified" before
 #     single-sample selection.
-#   - Single sample: largest m events where m = max(25, n_water_years),
-#                    at most one peak per water year.
-#   - Per type:      largest n events where n = max(20, n_water_years),
-#                    at most one peak per water year.
+#   - Single sample: largest m independent events where m = max(25, n_water_years),
+#                    ranked directly by peak flow with no per-water-year cap.
+#   - Per type:      largest n independent events where n = max(20, n_water_years),
+#                    ranked directly by peak flow with no per-water-year cap.
 #   Selection flags stored in in_single_sample and in_type_sample columns.
 #
 # INPUTS:
