@@ -8,7 +8,9 @@
 # window, search_radius) as the classification feature. SWE is not used.
 #
 # Classification rules (evaluated in order):
-#   1. Unclassified  : n_days_data < completeness threshold, or rain_frac NA
+#   1. Unclassified  : n_days_data < completeness threshold, rain_frac NA, or
+#                      total antecedent-window flux below NOISE_FLOOR_MM
+#                      (flux_sufficient == FALSE)
 #   2. Rainfall      : rain_frac >= RAIN_FRAC_THRESH (= 0.99)
 #   3. Snowmelt      : rain_frac <  MIXED_SPLIT (population median of mixed events)
 #   4. Rain-on-snow  : rain_frac >= MIXED_SPLIT
@@ -19,8 +21,8 @@
 # compatibility with the dashboard's type_labels / type_colors machinery.
 #
 # The RAIN_FRAC_THRESH tolerance (0.99 rather than 1.0) absorbs floating-point
-# artifacts and trace-melt days that fall just above the 0.1 mm/day noise
-# floor. See phase_0_signoff.md for rationale.
+# artifacts in the rain_frac ratio itself. See phase_0_signoff.md for
+# rationale.
 #
 # MIXED_SPLIT is the population-level median of rain_frac over all
 # data-sufficient peaks with rain_frac < RAIN_FRAC_THRESH, pooled across all
@@ -57,13 +59,16 @@ meta_file   <- "_data/site_metadata.rds"
 output_file <- "_data/pot_peaks_classified_frac_thresh_3class.rds"
 
 # Rainfall threshold: peaks with rain_frac >= this value are classified as
-# rainfall. The 0.99 tolerance absorbs floating-point artifacts and trace-melt
-# days just above the 0.1 mm/day noise floor.
+# rainfall. The 0.99 tolerance absorbs floating-point artifacts in the
+# rain_frac ratio itself.
 RAIN_FRAC_THRESH <- 0.99
 
-# Noise floor: days where both rain and melt are below this value are treated
-# as inactive and excluded from rain_frac computation.
-NOISE_FLOOR_MM <- 0.1    # mm/day
+# Noise floor: a peak-level eligibility threshold on total antecedent-window
+# flux (total_flux = summed rain + melt over the window). Peaks whose total
+# flux falls below this value are excluded from analysis entirely (both
+# type-conditioned classification and the single-sample pool) as suspected
+# model/observation mismatches, not merely zeroed out day-by-day.
+NOISE_FLOOR_MM <- 0.1    # mm, applied to total_flux
 
 # Completeness: minimum fraction of search_radius days that must have WLDAS
 # data for a peak to be classified (rather than marked unclassified).
@@ -100,9 +105,11 @@ message(sprintf("Accum curve rows: %d", nrow(accum)))
 message("\nComputing rain_frac (search_radius window)...")
 
 # Weighted rain fraction over each peak's basin-adaptive antecedent window.
-# Only days where at least one flux (rain or melt) exceeds NOISE_FLOOR_MM are
-# considered active. rain_frac = total active rain / total active flux.
-# NA is returned for peaks where total active flux == 0 (no active days).
+# total_rain_flux / total_melt_flux are plain sums of the raw daily values —
+# no per-day activity floor. rain_frac = total rain / total flux; NA is
+# returned for peaks where total flux == 0. Peaks whose total_flux falls
+# below NOISE_FLOOR_MM are excluded downstream via the explicit
+# flux_sufficient flag (see below), not filtered out here.
 peaks_with_windows <- peaks %>%
   dplyr::mutate(short_window = search_radius)
 
@@ -112,16 +119,11 @@ feat <- accum %>%
     by = c("site_no", "peak_id")
   ) %>%
   dplyr::filter(lookback_day <= short_window) %>%
-  dplyr::mutate(
-    rain_active  = dplyr::if_else(rain_mm_day >= NOISE_FLOOR_MM, rain_mm_day, 0),
-    melt_active  = dplyr::if_else(melt_mm_day >= NOISE_FLOOR_MM, melt_mm_day, 0),
-    total_active = rain_active + melt_active
-  ) %>%
   dplyr::group_by(site_no, peak_id) %>%
   dplyr::summarise(
-    total_rain_flux = sum(rain_active,  na.rm = TRUE),
-    total_melt_flux = sum(melt_active,  na.rm = TRUE),
-    total_flux      = sum(total_active, na.rm = TRUE),
+    total_rain_flux = sum(rain_mm_day, na.rm = TRUE),
+    total_melt_flux = sum(melt_mm_day, na.rm = TRUE),
+    total_flux      = total_rain_flux + total_melt_flux,
     n_days_data     = dplyr::first(n_days_data),
     .groups = "drop"
   ) %>%
@@ -146,7 +148,8 @@ classified <- peaks %>%
   dplyr::left_join(feat, by = c("site_no", "peak_id")) %>%
   dplyr::left_join(meta %>% dplyr::select(site_no, regulated), by = "site_no") %>%
   dplyr::mutate(
-    data_sufficient = n_days_data >= ceiling(short_window * MIN_DAYS_SHORT)
+    data_sufficient = n_days_data >= ceiling(short_window * MIN_DAYS_SHORT),
+    flux_sufficient = total_flux >= NOISE_FLOOR_MM
   )
 
 # ============================================================================
@@ -157,7 +160,8 @@ message("\nComputing population median split for mixed events...")
 # Mixed events: data-sufficient peaks with rain_frac < RAIN_FRAC_THRESH.
 # MIXED_SPLIT is computed once from all sites pooled, then applied uniformly.
 mixed_rain_frac <- classified %>%
-  dplyr::filter(data_sufficient, !is.na(rain_frac), rain_frac < RAIN_FRAC_THRESH) %>%
+  dplyr::filter(data_sufficient, !is.na(rain_frac), flux_sufficient,
+                rain_frac < RAIN_FRAC_THRESH) %>%
   dplyr::pull(rain_frac)
 
 MIXED_SPLIT <- median(mixed_rain_frac)
@@ -175,14 +179,16 @@ message("\nClassifying peaks...")
 classified <- classified %>%
   dplyr::mutate(
     # Decision tree (evaluated in order):
-    #   1. Unclassified : data insufficient or rain_frac NA
+    #   1. Unclassified : data insufficient, rain_frac NA, or total
+    #                     antecedent-window flux below NOISE_FLOOR_MM
+    #                     (flux_sufficient == FALSE)
     #   2. Rainfall     : rain_frac >= RAIN_FRAC_THRESH (= 0.99)
     #   3. Snowmelt     : rain_frac < MIXED_SPLIT (lower half of mixed events)
     #   4. Rain-on-snow : rain_frac >= MIXED_SPLIT (upper half of mixed events)
     #
     # "Snowmelt" and "rain_on_snow" are operationally defined — see header.
     flood_type_raw = dplyr::case_when(
-      !data_sufficient | is.na(rain_frac) ~ "unclassified",
+      !data_sufficient | is.na(rain_frac) | !flux_sufficient ~ "unclassified",
       rain_frac >= RAIN_FRAC_THRESH       ~ "rainfall",
       rain_frac <  MIXED_SPLIT            ~ "snowmelt",
       TRUE                                ~ "rain_on_snow"
@@ -228,8 +234,11 @@ classified <- classified %>%
 # Single-sample: largest m independent peaks per site, ranked directly by
 # peak flow with no per-water-year cap.
 # m = max(MIN_SINGLE_SAMPLE, number of unique water years at site).
+# Shares the flux_sufficient eligibility criterion with the type-conditioned
+# classification, so both the single-sample and per-type pools exclude the
+# same suspected model/observation-mismatch peaks.
 single_sample_ids <- classified %>%
-  dplyr::filter(data_sufficient & !is.na(rain_frac)) %>%
+  dplyr::filter(data_sufficient & !is.na(rain_frac) & flux_sufficient) %>%
   dplyr::group_by(site_no) %>%
   dplyr::mutate(m    = pmax(MIN_SINGLE_SAMPLE, dplyr::n_distinct(water_year)),
                 rank = dplyr::row_number(dplyr::desc(peak_flow))) %>%
