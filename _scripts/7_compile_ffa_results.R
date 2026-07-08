@@ -308,9 +308,6 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
     if (!is.null(pooled_types) && typ %in% pooled_types) {
       site_peaks %>%
         filter(flood_type == typ) %>%
-        group_by(water_year) %>%
-        slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
-        group_by() %>%
         mutate(n    = pmax(MIN_TYPE_SAMPLE, n_distinct(water_year)),
                rank = row_number(desc(peak_flow))) %>%
         filter(rank <= n) %>%

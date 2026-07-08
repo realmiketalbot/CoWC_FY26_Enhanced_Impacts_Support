@@ -229,8 +229,6 @@ classified <- classified %>%
 # m = max(MIN_SINGLE_SAMPLE, number of unique water years at site).
 single_sample_ids <- classified %>%
   dplyr::filter(data_sufficient & !is.na(rain_frac)) %>%
-  dplyr::group_by(site_no, water_year) %>%
-  dplyr::slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
   dplyr::group_by(site_no) %>%
   dplyr::mutate(m    = pmax(MIN_SINGLE_SAMPLE, dplyr::n_distinct(water_year)),
                 rank = dplyr::row_number(dplyr::desc(peak_flow))) %>%
@@ -243,8 +241,6 @@ single_sample_ids <- classified %>%
 # Types with fewer than MIN_TYPE_SAMPLE events at a site are dropped entirely.
 type_sample_ids <- classified %>%
   dplyr::filter(flood_type != "unclassified") %>%
-  dplyr::group_by(site_no, flood_type, water_year) %>%
-  dplyr::slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
   dplyr::group_by(site_no, flood_type) %>%
   dplyr::mutate(n    = pmax(MIN_TYPE_SAMPLE, dplyr::n_distinct(water_year)),
                 rank = dplyr::row_number(dplyr::desc(peak_flow))) %>%

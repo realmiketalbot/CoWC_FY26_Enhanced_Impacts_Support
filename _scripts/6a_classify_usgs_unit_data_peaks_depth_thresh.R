@@ -164,8 +164,6 @@ classified <- classified %>%
 # data insufficiency are excluded.
 single_sample_ids <- classified %>%
   filter(complete_window) %>%
-  group_by(site_no, water_year) %>%
-  slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
   group_by(site_no) %>%
   mutate(m    = pmax(MIN_SINGLE_SAMPLE, n_distinct(water_year)),
          rank = row_number(desc(peak_flow))) %>%
@@ -178,8 +176,6 @@ single_sample_ids <- classified %>%
 # for site-types reaching MIN_TYPE_SAMPLE.
 type_sample_ids <- classified %>%
   filter(flood_type != "unclassified") %>%
-  group_by(site_no, flood_type, water_year) %>%
-  slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
   group_by(site_no, flood_type) %>%
   mutate(n    = pmax(MIN_TYPE_SAMPLE, n_distinct(water_year)),
          rank = row_number(desc(peak_flow))) %>%
