@@ -1,0 +1,50 @@
+# r-conda environment
+
+## Setup
+
+```
+conda env create -f _environments/r-conda-no-builds.yml
+conda activate r-conda
+```
+
+In R, from the project root:
+
+```r
+renv::restore()
+```
+
+If `renv::restore()` fails on packages not resolvable from CRAN binaries (e.g. `arrow`), try:
+
+```r
+renv::hydrate()
+```
+
+## Known issue: LD_LIBRARY_PATH
+
+Positron's R kernel does not inherit `LD_LIBRARY_PATH` (or `PATH`/`PKG_CONFIG_PATH`) from
+this conda environment, even when the environment is active in the underlying shell. This
+breaks two things:
+
+- Compiling packages from source (missing compilers/headers) — fixable per-session with
+  `Sys.setenv()`, or permanently via a project `.Rprofile`.
+- Loading already-compiled packages that depend on conda-provided shared libraries
+  (`arrow`, `sf`) — `Sys.setenv(LD_LIBRARY_PATH = ...)` does *not* fix this; it appears
+  glibc caches the linker search path at process startup and ignores later changes.
+
+The fix for the second case is `fix_renv_rpaths.sh`, which patches the RPATH directly into
+the cached `arrow.so` / `sf.so` files so they don't depend on `LD_LIBRARY_PATH` at all.
+
+**Run this after any `renv::restore()` or `renv::hydrate()` that (re)installs `arrow` or `sf`:**
+
+```
+bash fix_renv_rpaths.sh
+```
+
+Root cause (Positron not inheriting the conda shell environment) is unresolved. This
+script is a workaround, not a fix.
+
+## Files
+
+- `r-conda.yml` — conda environment spec
+- `../renv.lock` — R package versions
+- `fix_renv_rpaths.sh` — reapplies RPATH fix after arrow/sf reinstalls

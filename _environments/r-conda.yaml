@@ -1,0 +1,46 @@
+name: r-conda
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  # --- Core ---
+  - python=3.12
+  - r-base=4.4
+  - make
+  - compilers
+  - git
+  - gdal
+  - libgdal-hdf5
+  - proj
+  - geos
+  - libnetcdf
+  - hdf5
+  - udunits2
+  - libcurl
+  - openssl
+  - icu
+  - r-sf
+  - r-terra
+  - r-arrow
+  - r-tidyverse
+  - r-data.table
+  - r-dtplyr
+  - r-dt
+  - r-fst
+  - r-rnaturalearth
+  - r-rnaturalearthdata
+  - r-ggpp
+  - r-gridextra
+  - r-patchwork
+  - r-scales
+  - r-colorspace
+  - r-ggh4x
+  - r-plotly
+  - r-profvis
+  - r-caret
+  - r-ranger
+  - r-pdp
+  - r-iml
+
+  # install manually as needed: tidyterra, hydrogof, topsis, emoa, exactextractr, future, furrr
+  # e.g., install.packages(c("tidyterra", "exactextractr", "furrr"))

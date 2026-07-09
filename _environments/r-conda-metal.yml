@@ -1,0 +1,49 @@
+name: r-conda
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - gdal
+  - geos
+  - git
+  - hdf5
+  - icu
+  - libcurl
+  - libgdal-hdf5
+  - libnetcdf
+  - make
+  - openssl
+  - proj
+  - python=3.12
+  - r-arrow
+  - r-caret
+  - r-colorspace
+  - r-data.table
+  - r-dt
+  - r-dtplyr
+  - r-fst
+  - r-ggh4x
+  - r-ggpp
+  - r-gridextra
+  - r-iml
+  - r-patchwork
+  - r-pdp
+  - r-plotly
+  - r-profvis
+  - r-ranger
+  - r-rnaturalearth
+  - r-rnaturalearthdata
+  - r-scales
+  - r-sf
+  - r-terra
+  - r-tidyverse
+  - udunits2
+  - r-cluster
+  - r-scatterpie
+  - r-diptest
+  - r-diagrammer
+  - r-leaflet
+  - r-s2
+  - r-shiny
+
+# then run install.packages("lmomco")
