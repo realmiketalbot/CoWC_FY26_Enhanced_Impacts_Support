@@ -1,4 +1,4 @@
-name: r-conda
+name: r-cowc
 channels:
   - conda-forge
   - https://repo.anaconda.com/pkgs/main
