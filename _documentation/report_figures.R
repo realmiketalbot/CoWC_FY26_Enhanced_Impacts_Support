@@ -1,6 +1,10 @@
 # Setup ----
 library(tidyverse)
 library(ggpattern)
+<<<<<<< HEAD
+=======
+library(legendry)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 library(tigris)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -19,7 +23,10 @@ station_spatial     <- readRDS("_data/station_spatial.rds")
 ffa_q_lp3           <- readRDS("_data/ffa_quantiles_lp3.rds")
 am_rain_frac_trends <- readRDS("_data/temporal_trends_am_frac_thresh_3class.rds")[["am_rain_frac_trends"]]
 
+<<<<<<< HEAD
 # Shared recode vector for curve_type -> display label (mirrors type_labels in app.R)
+=======
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 flood_type_recode <- c(
   rainfall     = "Rainfall",
   snowmelt     = "Snowmelt",
@@ -36,8 +43,12 @@ co_boundary_study <- tigris::states(cb = TRUE, class = "sf", progress_bar = FALS
   dplyr::filter(STUSPS == "CO") %>%
   sf::st_transform(4326)
 
+<<<<<<< HEAD
 neighbor_states_study <- tigris::states(cb = TRUE, class = "sf", progress_bar = FALSE) %>%
   dplyr::filter(STUSPS %in% c("WY", "NE", "KS", "OK", "NM", "UT")) %>%
+=======
+co_counties_study <- tigris::counties(state = "CO", cb = TRUE, class = "sf", progress_bar = FALSE) %>%
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   sf::st_transform(4326)
 
 study_area_data <- station_spatial %>%
@@ -51,8 +62,14 @@ study_area_data <- station_spatial %>%
   )
 
 ggplot() +
+<<<<<<< HEAD
   ggplot2::geom_sf(data = neighbor_states_study, fill = "white", color = "grey60", linewidth = 0.3) +
   ggplot2::geom_sf(data = co_boundary_study, fill = "white", color = "grey20", linewidth = 0.5) +
+=======
+  ggplot2::geom_sf(data = co_boundary_study, fill = "white", color = NA) +
+  ggplot2::geom_sf(data = co_counties_study, fill = NA, color = "grey85", linewidth = 0.2) +
+  ggplot2::geom_sf(data = co_boundary_study, fill = NA, color = "grey20", linewidth = 0.5) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ggplot2::geom_sf(data = study_area_data, aes(color = reg_label, shape = reg_label), size = 2.2, alpha = 0.9) +
   ggplot2::scale_color_manual(
     values = c("Unregulated" = "#1E4D2B", "Regulated" = "#C8C372", "Unknown" = "grey50"),
@@ -63,8 +80,13 @@ ggplot() +
     name   = "Regulation status"
   ) +
   ggplot2::coord_sf(
+<<<<<<< HEAD
     xlim = sf::st_bbox(co_boundary_study)[c("xmin", "xmax")] + c(-0.5, 0.5),
     ylim = sf::st_bbox(co_boundary_study)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+    xlim = sf::st_bbox(co_boundary_study)[c("xmin", "xmax")] + c(0, 0),
+    ylim = sf::st_bbox(co_boundary_study)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::labs(
     title    = "Study Area and Streamgage Network",
@@ -81,7 +103,17 @@ plot_data <- peaks_frac %>%
   dplyr::select(rain_frac)
 
 ggplot(plot_data, aes(x = rain_frac)) +
+<<<<<<< HEAD
   geom_histogram(binwidth = 0.04) +
+=======
+  geom_histogram(binwidth = 0.05) +
+  labs(
+    title = "Histogram of Rain Fraction",
+    subtitle = "Population-level histogram across all sites; bin width of 0.05",
+    x = "Rain Fraction", 
+    y = "# of peaks"
+  ) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   theme_bw() +
   theme(
     plot.subtitle       = element_text(size = 11, face = "italic"),
@@ -89,11 +121,18 @@ ggplot(plot_data, aes(x = rain_frac)) +
     panel.grid.minor.x  = element_blank()
   )
 
+<<<<<<< HEAD
 ### Figure: Classification Composition (population-level) ----
 
 # Build tidy labels for each method from the classified peaks directly.
 # flood_type_raw captures the threshold-only classification before any
 # sample-size demotion, allowing a like-for-like composition comparison.
+=======
+ggsave(file.path(fig_dir, "rain_fraction_histogram.png"), width = 6.5, height = 3.5, units = "in")
+
+### Figure: Classification Composition (population-level) ----
+
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 label_dt <- peaks_dt %>%
   dplyr::mutate(
     method     = "Depth threshold",
@@ -118,8 +157,12 @@ label_frac <- peaks_frac %>%
   ) %>%
   dplyr::select(method, type_label)
 
+<<<<<<< HEAD
 # 2-class: rainfall stays as-is, snowmelt + rain-on-snow collapse to
 # Snow-Influenced (mirrors remap_2class() in Script 7 / SNOW_INFLUENCED_TYPES)
+=======
+# Collapsing mirrors remap_2class() in Script 7 / SNOW_INFLUENCED_TYPES.
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 label_frac2 <- peaks_frac %>%
   dplyr::mutate(
     method     = "Rain fraction (2-class)",
@@ -149,9 +192,14 @@ comp_data <- dplyr::bind_rows(label_dt, label_frac, label_frac2) %>%
   ) %>%
   dplyr::ungroup()
 
+<<<<<<< HEAD
 # Solid fill colors -- "Snow-Influenced" gets the same blue as Snowmelt as its
 # background; the stripe foreground color is set separately below via
 # pattern_fill, since that's a fixed parameter rather than a mapped aesthetic.
+=======
+# The stripe foreground for "Snow-Influenced" is set separately below via
+# pattern_fill, since that's a fixed ggpattern parameter, not a mapped aesthetic.
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 comp_colors <- c(
   "Rainfall"        = "#b2182b",
   "Snowmelt"        = "#2166ac",
@@ -160,7 +208,10 @@ comp_colors <- c(
   "Unclassified"    = "#d9d9d9"
 )
 
+<<<<<<< HEAD
 # Only "Snow-Influenced" gets a pattern; everything else is a solid fill
+=======
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 comp_patterns <- c(
   "Rainfall"        = "none",
   "Snowmelt"        = "none",
@@ -281,6 +332,7 @@ co_boundary <- tigris::states(cb = TRUE, class = "sf", progress_bar = FALSE) %>%
   dplyr::filter(STUSPS == "CO") %>%
   sf::st_transform(4326)
 
+<<<<<<< HEAD
 neighbor_states <- tigris::states(cb = TRUE, class = "sf", progress_bar = FALSE) %>%
   dplyr::filter(STUSPS %in% c("WY", "NE", "KS", "OK", "NM", "UT")) %>%
   sf::st_transform(4326)
@@ -288,6 +340,17 @@ neighbor_states <- tigris::states(cb = TRUE, class = "sf", progress_bar = FALSE)
 ggplot() +
   ggplot2::geom_sf(data = neighbor_states, fill = "white", color = "grey60", linewidth = 0.3) +
   ggplot2::geom_sf(data = co_boundary, fill = "white", color = "grey20", linewidth = 0.5) +
+=======
+co_counties <- tigris::counties(state = "CO", cb = TRUE, class = "sf", progress_bar = FALSE) %>%
+  sf::st_transform(4326)
+
+raininess_pal <- c("#2166ac", "#9970ab", "#b2182b")
+
+ggplot() +
+  ggplot2::geom_sf(data = co_boundary, fill = "white", color = NA) +
+  ggplot2::geom_sf(data = co_counties, fill = NA, color = "grey85", linewidth = 0.2) +
+  ggplot2::geom_sf(data = co_boundary, fill = NA, color = "grey20", linewidth = 0.5) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ggplot2::geom_sf(data = map_data, aes(color = raininess), size = 2.2, alpha = 0.9) +
   ggplot2::scale_color_gradientn(
     colours = raininess_pal,
@@ -295,8 +358,13 @@ ggplot() +
     name    = "Fraction of \nrainfall peaks"
   ) +
   ggplot2::coord_sf(
+<<<<<<< HEAD
     xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(-0.5, 0.5),
     ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+    xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(0, 0),
+    ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::labs(
     title    = "Spatial Patterns of Flood Classifications",
@@ -321,8 +389,18 @@ elev_raininess <- site_raininess %>%
   )
 
 ggplot(elev_raininess, aes(x = elev_mean_m, y = raininess)) +
+<<<<<<< HEAD
   geom_point() +
   geom_smooth(method = "loess", se = F) +
+=======
+  geom_point(aes(color = raininess), size = 2.2, alpha = 0.9) +
+  geom_smooth(method = "loess", se = FALSE, color = "grey20", linewidth = 0.8) +
+  scale_color_gradientn(
+    colours = raininess_pal,
+    limits  = c(0, 1),
+    name    = "Fraction of \nrainfall peaks"
+  ) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   scale_y_continuous(labels = scales::percent, name = "Fraction of rainfall peaks", limits = c(0, 1)) +
   scale_x_continuous(name = "Basin mean elevation (m)") +
   labs(
@@ -331,8 +409,14 @@ ggplot(elev_raininess, aes(x = elev_mean_m, y = raininess)) +
   ) +
   theme_bw(base_size = 12) +
   theme(
+<<<<<<< HEAD
     panel.grid.minor = element_blank(),
     plot.subtitle       = element_text(size = 11, face = "italic"),
+=======
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    plot.subtitle    = element_text(size = 11, face = "italic"),
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   )
 
 ggsave(file.path(fig_dir, "fraction_of_rainfall_peaks_vs_elevation_site_level.png"), width = 6.5, height = 4.5, units = "in")
@@ -368,6 +452,7 @@ knitr::kable(
   caption   = "Number of watersheds (of 206) with sufficient peaks (\u2265 20) to support a per-type distribution fit."
 )
 
+<<<<<<< HEAD
 ### Figure: scatterplot of fraction of rainfall peaks vs elevation
 
 # This looks like a duplicate of "Figure: fraction of rainfall peaks vs
@@ -375,14 +460,61 @@ knitr::kable(
 # same subsection. I haven't regenerated it here; if you meant something
 # different (e.g. faceted by classification method, or scoped to a subset of
 # sites), let me know and I'll build that version instead.
+=======
+### Table: number of watersheds by number of flood type curves available ----
+
+site_type_counts <- function(peaks) {
+  peaks %>%
+    dplyr::filter(flood_type != "unclassified") %>%
+    dplyr::distinct(site_no, flood_type) %>%
+    dplyr::count(site_no, name = "n_types")
+}
+
+bucket_labels <- c(
+  "0" = "None (single-sample only)",
+  "1" = "One flood type curve",
+  "2" = "Two flood type curves",
+  "3" = "Three flood type curves"
+)
+
+curve_count_dt <- tibble::tibble(site_no = unique(peaks_dt$site_no)) %>%
+  dplyr::left_join(site_type_counts(peaks_dt), by = "site_no") %>%
+  dplyr::mutate(n_types = tidyr::replace_na(n_types, 0L)) %>%
+  dplyr::count(n_types, name = "n_sites") %>%
+  dplyr::mutate(method = "Depth threshold")
+
+curve_count_frac <- tibble::tibble(site_no = unique(peaks_frac$site_no)) %>%
+  dplyr::left_join(site_type_counts(peaks_frac), by = "site_no") %>%
+  dplyr::mutate(n_types = tidyr::replace_na(n_types, 0L)) %>%
+  dplyr::count(n_types, name = "n_sites") %>%
+  dplyr::mutate(method = "Rain fraction (3-class)")
+
+curve_count_table <- dplyr::bind_rows(curve_count_dt, curve_count_frac) %>%
+  dplyr::mutate(
+    curves_available = dplyr::recode(as.character(n_types), !!!bucket_labels),
+    curves_available = factor(curves_available, levels = unname(bucket_labels))
+  ) %>%
+  tidyr::complete(curves_available, method, fill = list(n_sites = 0L)) %>%
+  dplyr::select(curves_available, method, n_sites) %>%
+  tidyr::pivot_wider(names_from = method, values_from = n_sites)
+
+knitr::kable(
+  curve_count_table,
+  col.names = c("Curves available", "Depth threshold", "Rain fraction (3-class)"),
+  caption   = "Number of watersheds (of 206) by number of flood-type curves available for the mixture distribution."
+)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 
 ## Sub-section: Mixed vs. single sample distribution FFA results ----
 
 ### Figure: map of dominant flood type for the 100-yr return period, GPD, Rain fraction (3-class) ----
 
+<<<<<<< HEAD
 # Mirrors the "dominant" symbology logic in app.R: at each site, the
 # per-type curve (excluding mixture/single_sample) with the highest Q100
 # is the "dominant" flood type driving that return period.
+=======
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 dominant_100yr <- ffa_q %>%
   dplyr::filter(
     method        == "frac_thresh_3class",
@@ -400,6 +532,7 @@ dominant_map_data <- station_spatial %>%
   dplyr::inner_join(dominant_100yr, by = "site_no")
 
 ggplot() +
+<<<<<<< HEAD
   ggplot2::geom_sf(data = neighbor_states, fill = "white", color = "grey60", linewidth = 0.3) +
   ggplot2::geom_sf(data = co_boundary, fill = "white", color = "grey20", linewidth = 0.5) +
   ggplot2::geom_sf(data = dominant_map_data, aes(color = dominant_label), size = 2.2, alpha = 0.9) +
@@ -407,6 +540,16 @@ ggplot() +
   ggplot2::coord_sf(
     xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(-0.5, 0.5),
     ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+  ggplot2::geom_sf(data = co_boundary, fill = "white", color = NA) +
+  ggplot2::geom_sf(data = co_counties, fill = NA, color = "grey85", linewidth = 0.2) +
+  ggplot2::geom_sf(data = co_boundary, fill = NA, color = "grey20", linewidth = 0.5) +
+  ggplot2::geom_sf(data = dominant_map_data, aes(color = dominant_label), size = 2.2, alpha = 0.9) +
+  ggplot2::scale_color_manual(values = comp_colors, name = "Dominant flood type\n(Q100, GPD)") +
+  ggplot2::coord_sf(
+    xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(0, 0),
+    ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::labs(
     title    = "Dominant Flood Type at the 100-Year Return Period",
@@ -441,8 +584,14 @@ plot_ratio_map <- function(ratio_df, family_label_txt, out_name) {
   max_abs  <- max(abs(map_df$log_ratio), na.rm = TRUE)
 
   p <- ggplot() +
+<<<<<<< HEAD
     ggplot2::geom_sf(data = neighbor_states, fill = "white", color = "grey60", linewidth = 0.3) +
     ggplot2::geom_sf(data = co_boundary, fill = "white", color = "grey20", linewidth = 0.5) +
+=======
+    ggplot2::geom_sf(data = co_boundary, fill = "white", color = NA) +
+    ggplot2::geom_sf(data = co_counties, fill = NA, color = "grey85", linewidth = 0.2) +
+    ggplot2::geom_sf(data = co_boundary, fill = NA, color = "grey20", linewidth = 0.5) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
     ggplot2::geom_sf(data = map_df, aes(color = log_ratio), size = 2.2, alpha = 0.9) +
     ggplot2::scale_color_gradient2(
       low      = "#2166ac", mid = "grey90", high = "#b2182b", midpoint = 0,
@@ -451,8 +600,13 @@ plot_ratio_map <- function(ratio_df, family_label_txt, out_name) {
       name     = "Q100 ratio\n(mixture / single sample)"
     ) +
     ggplot2::coord_sf(
+<<<<<<< HEAD
       xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(-0.5, 0.5),
       ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+      xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(0, 0),
+      ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
     ) +
     ggplot2::labs(
       title    = paste0("Mixture vs. Single-Sample Q100 Ratio (", family_label_txt, ")"),
@@ -479,8 +633,11 @@ plot_ratio_map(ratio_lp3_100, "LP3", "ratio_map_100yr_lp3.png")
 
 ### Figure: scatterplot of mixed vs single sample for the 100-year, GPD ----
 
+<<<<<<< HEAD
 # Reuses ratio_gpd_100 computed just above; joins back to `regulated` for
 # point styling, matching the convention used in app.R's ffa_q_plot.
+=======
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 scatter_100_gpd <- ratio_gpd_100 %>%
   dplyr::left_join(
     sf::st_drop_geometry(meta) %>% dplyr::select(site_no, regulated),
@@ -539,7 +696,10 @@ ggsave(file.path(fig_dir, "ratio_boxplot_all_rp_gpd.png"), width = 6.5, height =
 
 ### Figure: column plot of binary (above/below 1.0 ratio) fraction for all return periods for GPD and Rain fraction (3-class) (mixed over single sample) ----
 
+<<<<<<< HEAD
 # Reuses ratio_all_rp_gpd computed just above.
+=======
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 ratio_binary_counts <- ratio_all_rp_gpd %>%
   dplyr::mutate(
     above_below = dplyr::if_else(ratio >= 1, "Mixture \u2265 Single Sample", "Mixture < Single Sample")
@@ -581,6 +741,7 @@ ggsave(file.path(fig_dir, "ratio_binary_count_all_rp_gpd.png"), width = 6.5, hei
 
 ## Sub-section: Trends in flood drivers ----
  
+<<<<<<< HEAD
 ### Figure: map of annual maxima rain fraction ----
 
 # Interpreting this placeholder as the Mann-Kendall trend in AM rain
@@ -589,6 +750,13 @@ ggsave(file.path(fig_dir, "ratio_binary_count_all_rp_gpd.png"), width = 6.5, hei
 # wouldn't have an obvious "map" to show. If you actually wanted a snapshot
 # (e.g. mean AM rain fraction over the record, or for one water year), let
 # me know and I'll swap this out.
+=======
+### Figure: map of trend in annual maxima rain fraction ----
+am_trends           <- readRDS("_data/temporal_trends_am_frac_thresh_3class.rds")
+am_rain_frac_trends <- am_trends[["am_rain_frac_trends"]]
+am_peak_flow_trends <- am_trends[["am_peak_flow_trends"]]
+
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 rf_trend_map_data <- station_spatial %>%
   dplyr::inner_join(
     am_rain_frac_trends %>% dplyr::select(site_no, sen_slope, significant),
@@ -596,6 +764,7 @@ rf_trend_map_data <- station_spatial %>%
   ) %>%
   dplyr::filter(!is.na(sen_slope))
 
+<<<<<<< HEAD
 max_abs_slope <- max(abs(rf_trend_map_data$sen_slope), na.rm = TRUE)
 
 ggplot() +
@@ -606,6 +775,31 @@ ggplot() +
     low = "#2166ac", mid = "grey90", high = "#b2182b", midpoint = 0,
     limits = c(-max_abs_slope, max_abs_slope),
     name   = "Sen slope\n(rain fraction/yr)"
+=======
+# color_limit is the 90th percentile of |slope|; values beyond it are squished
+# to the endpoint color, and the guide's triangular end caps mark those colors
+# as "beyond this value," not an exact reading.
+color_limit <- stats::quantile(abs(rf_trend_map_data$sen_slope), 0.90, na.rm = TRUE)
+
+ggplot() +
+  ggplot2::geom_sf(data = co_boundary, fill = "white", color = NA) +
+  ggplot2::geom_sf(data = co_counties, fill = NA, color = "grey85", linewidth = 0.2) +
+  ggplot2::geom_sf(data = co_boundary, fill = NA, color = "grey20", linewidth = 0.5) +
+  ggplot2::geom_sf(
+    data = rf_trend_map_data,
+    aes(color = sen_slope, shape = significant), size = 2.4, alpha = 1
+  ) +
+  ggplot2::scale_color_gradient2(
+    low = "#2166ac", mid = "grey85", high = "#b2182b", midpoint = 0,
+    limits = c(-color_limit, color_limit),
+    oob    = scales::oob_squish,
+    name   = "Sen slope\n(rain fraction/yr)",
+    guide  = legendry::guide_colbar(
+      shape = "triangle",
+      show  = NA,
+      oob   = "squish"
+    )
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::scale_shape_manual(
     values = c(`TRUE` = 17, `FALSE` = 16),
@@ -613,8 +807,13 @@ ggplot() +
     name   = "Mann-Kendall test"
   ) +
   ggplot2::coord_sf(
+<<<<<<< HEAD
     xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(-0.5, 0.5),
     ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+    xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(0, 0),
+    ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::labs(
     title    = "Trend in Annual Maxima Rain Fraction",
@@ -628,6 +827,7 @@ ggplot() +
 
 ggsave(file.path(fig_dir, "am_rain_fraction_trend_map.png"), width = 6.5, height = 4.5, units = "in")
 
+<<<<<<< HEAD
 ### Figure: scatterplot of rain fraction vs elevation (all PoT events) ----
 
 # Peak-level (not site-aggregated): every classified POT event's individual
@@ -636,11 +836,19 @@ ggsave(file.path(fig_dir, "am_rain_fraction_trend_map.png"), width = 6.5, height
 peak_elev_data <- peaks_frac %>%
   dplyr::filter(!is.na(rain_frac)) %>%
   dplyr::select(site_no, rain_frac) %>%
+=======
+### Figure: scatterplot of rain fraction trend vs elevation (site-level) ----
+
+trend_elev_data <- am_rain_frac_trends %>%
+  dplyr::select(site_no, sen_slope, significant) %>%
+  dplyr::filter(!is.na(sen_slope)) %>%
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   dplyr::inner_join(
     sf::st_drop_geometry(station_spatial) %>% dplyr::select(site_no, elev_mean_m),
     by = "site_no"
   )
 
+<<<<<<< HEAD
 ggplot(peak_elev_data, aes(x = elev_mean_m, y = rain_frac)) +
   geom_point(alpha = 0.15, size = 1) +
   geom_smooth(method = "loess", se = FALSE, linewidth = 0.8) +
@@ -649,10 +857,32 @@ ggplot(peak_elev_data, aes(x = elev_mean_m, y = rain_frac)) +
   labs(
     title    = "Rain Fraction of Individual Flood Events by Elevation",
     subtitle = "Every classified peak-over-threshold event across all sites; line shows the overall trend"
+=======
+ggplot(trend_elev_data, aes(x = elev_mean_m, y = sen_slope)) +
+  geom_hline(yintercept = 0, color = "grey50", linewidth = 0.4, linetype = "dashed") +
+  geom_point(aes(shape = significant, fill = significant), color = "grey20", size = 2.4, stroke = 0.4) +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 0.8, color = "black") +
+  scale_shape_manual(
+    values = c(`TRUE` = 23, `FALSE` = 21),
+    labels = c(`TRUE` = "p < 0.05", `FALSE` = "Not significant"),
+    name   = "Mann-Kendall test"
+  ) +
+  scale_fill_manual(
+    values = c(`TRUE` = "#b2182b", `FALSE` = "grey70"),
+    labels = c(`TRUE` = "p < 0.05", `FALSE` = "Not significant"),
+    name   = "Mann-Kendall test"
+  ) +
+  scale_y_continuous(name = "Sen's slope, annual maximum rain fraction (per yr)") +
+  scale_x_continuous(name = "Basin mean elevation (m)") +
+  labs(
+    title    = "Trend in Annual Maximum Rain Fraction by Elevation",
+    subtitle = "Each point is one site's long-term trend"
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   theme_bw(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
+<<<<<<< HEAD
     plot.subtitle       = element_text(size = 11, face = "italic")
   )
 
@@ -666,6 +896,15 @@ ggsave(file.path(fig_dir, "rain_fraction_vs_elevation_all_events.png"), width = 
 # (cfs/yr instead of fraction/yr) -- kept as a separate figure rather than a
 # facet since the color scale domain differs by orders of magnitude across
 # variables and would wash out one or the other on a shared scale.
+=======
+    plot.subtitle    = element_text(size = 11, face = "italic")
+  )
+
+ggsave(file.path(fig_dir, "rain_fraction_trend_vs_elevation.png"), width = 6.5, height = 4.5, units = "in")
+
+### Figure: trend in annual maxima streamflow ----
+ 
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 pf_trend_map_data <- station_spatial %>%
   dplyr::inner_join(
     am_peak_flow_trends %>% dplyr::select(site_no, sen_slope, significant),
@@ -676,8 +915,14 @@ pf_trend_map_data <- station_spatial %>%
 max_abs_slope_pf <- max(abs(pf_trend_map_data$sen_slope), na.rm = TRUE)
  
 ggplot() +
+<<<<<<< HEAD
   ggplot2::geom_sf(data = neighbor_states, fill = "white", color = "grey60", linewidth = 0.3) +
   ggplot2::geom_sf(data = co_boundary, fill = "white", color = "grey20", linewidth = 0.5) +
+=======
+  ggplot2::geom_sf(data = co_boundary, fill = "white", color = NA) +
+  ggplot2::geom_sf(data = co_counties, fill = NA, color = "grey85", linewidth = 0.2) +
+  ggplot2::geom_sf(data = co_boundary, fill = NA, color = "grey20", linewidth = 0.5) +
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ggplot2::geom_sf(data = pf_trend_map_data, aes(color = sen_slope, shape = significant), size = 2.2, alpha = 0.9) +
   ggplot2::scale_color_gradient2(
     low = "#2166ac", mid = "grey90", high = "#b2182b", midpoint = 0,
@@ -691,8 +936,13 @@ ggplot() +
     name   = "Mann-Kendall test"
   ) +
   ggplot2::coord_sf(
+<<<<<<< HEAD
     xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(-0.5, 0.5),
     ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(-0.5, 0.5)
+=======
+    xlim = sf::st_bbox(co_boundary)[c("xmin", "xmax")] + c(0, 0),
+    ylim = sf::st_bbox(co_boundary)[c("ymin", "ymax")] + c(0, 0)
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
   ) +
   ggplot2::labs(
     title    = "Trend in Annual Maxima Streamflow",
@@ -705,3 +955,286 @@ ggplot() +
   )
  
 ggsave(file.path(fig_dir, "am_peak_flow_trend_map.png"), width = 6.5, height = 4.5, units = "in")
+<<<<<<< HEAD
+=======
+
+### Example station figures: site 09081600 (Crystal River AB Avalanche Creek, near Redstone, CO) ----
+
+source("functions.R")   # needed for empirical_ri()
+
+ffa_curves <- list(
+  gpd = readRDS("_data/ffa_curves_gpd.rds"),
+  lp3 = readRDS("_data/ffa_curves_lp3.rds")
+)
+
+am_annual <- readRDS("_data/annual_am_type_frac_thresh_3class.rds")
+
+am_annual_list <- setNames(
+  lapply(c("depth_thresh", "frac_thresh_3class", "frac_thresh_2class"), function(m) {
+    readRDS(sprintf("_data/annual_am_type_%s.rds", m))
+  }),
+  c("depth_thresh", "frac_thresh_3class", "frac_thresh_2class")
+)
+
+EXAMPLE_SITE   <- "09081600"
+EXAMPLE_METHOD <- "frac_thresh_3class"
+EXAMPLE_FAMILY <- "gpd"
+
+# Local color/label maps matching app.R's global type_colors/type_labels —
+# defined here explicitly so this section doesn't depend on app.R's globals
+# being loaded into this script's environment.
+site_type_labels <- c(
+  rainfall        = "Rainfall",
+  snowmelt        = "Snowmelt",
+  rain_on_snow    = "Rain-on-Snow",
+  snow_influenced = "Snow-Influenced",
+  single_sample   = "Single Sample",
+  unclassified    = "Unclassified"
+)
+
+site_type_colors <- c(
+  Rainfall         = "#b2182b",
+  Snowmelt         = "#2166ac",
+  "Rain-on-Snow"   = "#9970ab",
+  "Snow-Influenced" = "#9970ab",
+  "Single Sample"  = "#888888",
+  Unclassified     = "#cccccc"
+)
+
+# ---- Load Script 7/8 outputs if not already in this session ----
+if (!exists("ffa_classification_summary"))
+  ffa_classification_summary <- readRDS("_data/ffa_classification_summary.rds")
+
+method_labels <- c(
+  depth_thresh       = "Depth threshold",
+  frac_thresh_3class = "Rain fraction (3-class)",
+  frac_thresh_2class = "Rain fraction (2-class)"
+)
+
+#### 1. Classification bar chart (cross-method composition, one site) ----
+
+stack_order <- c("Unclassified", "Snowmelt", "Rain-on-Snow", "Snow-Influenced", "Rainfall")
+
+class_plot_df <- ffa_classification_summary %>%
+  dplyr::filter(site_no == EXAMPLE_SITE) %>%
+  dplyr::group_by(method) %>%
+  dplyr::mutate(frac = n_peaks / sum(n_peaks)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    flood_label  = dplyr::recode(flood_type, !!!site_type_labels),
+    method_label = factor(
+      dplyr::recode(method, !!!method_labels),
+      levels = unname(method_labels[c("depth_thresh", "frac_thresh_3class", "frac_thresh_2class")])
+    ),
+    flood_label  = factor(flood_label, levels = stack_order[stack_order %in% unique(flood_label)])
+  )
+
+color_vec_class <- site_type_colors[names(site_type_colors) %in% levels(class_plot_df$flood_label)]
+if ("Snow-Influenced" %in% names(color_vec_class)) color_vec_class["Snow-Influenced"] <- "#2166ac"
+
+pattern_vec_class <- setNames(
+  ifelse(names(color_vec_class) == "Snow-Influenced", "stripe", "none"),
+  names(color_vec_class)
+)
+
+ggplot(class_plot_df, aes(x = method_label, y = frac, fill = flood_label, pattern = flood_label)) +
+  geom_col_pattern(
+    position = position_stack(reverse = FALSE),
+    width = 0.65, colour = "white", linewidth = 0.3,
+    pattern_fill             = "#9970ab",
+    pattern_colour           = NA,
+    pattern_density          = 0.5,
+    pattern_spacing          = 0.04,
+    pattern_angle            = 45,
+    pattern_key_scale_factor = 0.4
+  ) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1), expand = expansion(mult = c(0, 0.03))) +
+  scale_fill_manual(values = color_vec_class, name = NULL) +
+  scale_pattern_manual(values = pattern_vec_class, name = NULL) +
+  labs(
+    title    = "Flood Type Composition by Classification Method",
+    subtitle = paste0("Station ", EXAMPLE_SITE, " — example of dashboard's Peak Classification tab"),
+    x = NULL, y = "Fraction of peaks"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position    = "bottom",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    plot.subtitle      = element_text(size = 11, face = "italic"),
+    axis.text.x        = element_text(angle = 25, hjust = 1)
+  )
+
+ggsave(file.path(fig_dir, "example_site_classification_composition.png"), width = 6.5, height = 4.5, units = "in")
+
+#### 2. Return period (frequency curve) plot ----
+
+curves_df <- ffa_curves[[EXAMPLE_FAMILY]] %>%
+  dplyr::filter(site_no == EXAMPLE_SITE, method == EXAMPLE_METHOD) %>%
+  dplyr::mutate(
+    label = dplyr::case_when(
+      curve_type == "mixture"       ~ "Mixture",
+      curve_type == "single_sample" ~ "Single Sample",
+      TRUE                          ~ site_type_labels[curve_type]
+    ),
+    color = dplyr::case_when(
+      curve_type == "mixture"       ~ "black",
+      curve_type == "single_sample" ~ site_type_colors["Single Sample"],
+      TRUE                          ~ site_type_colors[site_type_labels[curve_type]]
+    ),
+    q = discharge_cfs
+  )
+
+present_types <- unique(curves_df$label)
+lty_vec   <- setNames(ifelse(present_types %in% c("Mixture", "Single Sample"), "solid", "dashed"), present_types)
+color_vec_ffa <- setNames(
+  curves_df %>% dplyr::distinct(label, color) %>% dplyr::pull(color),
+  curves_df %>% dplyr::distinct(label, color) %>% dplyr::pull(label)
+)
+
+type_curve_types <- unique(curves_df$curve_type[!curves_df$curve_type %in% c("mixture", "single_sample")])
+
+emp_peaks <- peaks_frac %>%
+  dplyr::filter(site_no == EXAMPLE_SITE, in_type_sample, as.character(flood_type) %in% type_curve_types)
+
+emp <- if (nrow(emp_peaks) > 0) {
+  empirical_ri(emp_peaks %>% dplyr::mutate(flood_type = factor(flood_type))) %>%
+    dplyr::mutate(flood_label = site_type_labels[as.character(flood_type)])
+} else data.frame()
+
+ss_ids <- peaks_frac %>%
+  dplyr::filter(site_no == EXAMPLE_SITE, in_single_sample) %>%
+  dplyr::pull(peak_flow)
+
+emp <- if (nrow(emp) > 0) dplyr::mutate(emp, in_ss = peak_flow %in% ss_ids) else emp
+emp_ss <- if (nrow(emp) > 0) dplyr::filter(emp, in_ss) else data.frame()
+
+ss_label <- "In Single Sample"
+color_vec_p <- if (nrow(emp_ss) > 0) c(color_vec_ffa, setNames("#888888", ss_label)) else color_vec_ffa
+legend_breaks <- if (nrow(emp_ss) > 0) c(names(color_vec_ffa), ss_label) else names(color_vec_ffa)
+line_only <- c("Mixture", "Single Sample")
+shape_overrides <- dplyr::case_when(
+  legend_breaks == ss_label    ~ 1L,
+  legend_breaks %in% line_only ~ NA_integer_,
+  TRUE                         ~ 16L
+)
+
+ggplot() +
+  geom_line(data = curves_df, aes(x = ri, y = q, colour = label, linetype = label), linewidth = 1.1, na.rm = TRUE) +
+  { if (nrow(emp_ss) > 0)
+      geom_point(data = emp_ss, aes(x = ri, y = peak_flow, colour = ss_label),
+                 shape = 1, size = 3.5, stroke = 0.9, alpha = 0.8) } +
+  { if (nrow(emp) > 0)
+      geom_point(data = emp, aes(x = ri, y = peak_flow, colour = flood_label),
+                 shape = 16, size = 1.8, alpha = 0.7) } +
+  scale_x_log10(breaks = c(2, 5, 10, 25, 50, 100, 200, 500)) +
+  scale_y_log10(labels = scales::label_comma()) +
+  scale_colour_manual(values = color_vec_p, breaks = legend_breaks, name = NULL) +
+  scale_linetype_manual(values = lty_vec, guide = "none") +
+  guides(colour = guide_legend(nrow = 2, override.aes = list(shape = shape_overrides))) +
+  labs(
+    title    = "Flood Discharge Estimates by Return Period",
+    subtitle = paste0("Station ", EXAMPLE_SITE, " — ", method_labels[EXAMPLE_METHOD],
+                      ", ", toupper(EXAMPLE_FAMILY), " — example of dashboard's FFA tab"),
+    x = "Return Period (years)", y = "Peak Discharge (cfs)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position  = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.subtitle    = element_text(size = 11, face = "italic")
+  )
+
+ggsave(file.path(fig_dir, "example_site_return_period_curve.png"), width = 6.5, height = 5, units = "in")
+
+#### 3. Peak time series ----
+
+timeline_data <- peaks_frac %>%
+  dplyr::filter(site_no == EXAMPLE_SITE) %>%
+  dplyr::mutate(flood_label = site_type_labels[as.character(flood_type_raw)])
+
+ggplot(timeline_data, aes(x = peak_date, y = peak_flow, colour = flood_label)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_colour_manual(values = site_type_colors, name = NULL) +
+  scale_x_date(name = "Peak Date") +
+  scale_y_continuous(name = "Peak Flow (cfs)", labels = scales::label_comma()) +
+  labs(
+    title    = "Peak Flows Over Time by Flood Type",
+    subtitle = paste0("Station ", EXAMPLE_SITE, " — ", method_labels[EXAMPLE_METHOD],
+                      " — example of dashboard's FFA tab")
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    plot.subtitle   = element_text(size = 11, face = "italic")
+  )
+
+ggsave(file.path(fig_dir, "example_site_peak_timeline.png"), width = 6.5, height = 4.5, units = "in")
+
+#### 4. Rain fraction trend plot ----
+
+rf_site_data <- am_annual %>%
+  dplyr::filter(site_no == EXAMPLE_SITE) %>%
+  dplyr::select(site_no, water_year, am_rain_frac)
+
+type_site_data <- am_annual_list[[EXAMPLE_METHOD]] %>%
+  dplyr::filter(site_no == EXAMPLE_SITE) %>%
+  dplyr::select(site_no, water_year, am_flood_type)
+
+site_am <- dplyr::inner_join(rf_site_data, type_site_data, by = c("site_no", "water_year")) %>%
+  dplyr::mutate(flood_label = site_type_labels[as.character(am_flood_type)])
+
+site_trend <- am_rain_frac_trends %>% dplyr::filter(site_no == EXAMPLE_SITE)
+
+sub_txt <- if (nrow(site_trend) > 0) {
+  t_row    <- site_trend[1, ]
+  sig_flag <- dplyr::case_when(
+    is.na(t_row$p_value)  ~ "",
+    t_row$p_value < 0.001  ~ " ***",
+    t_row$p_value < 0.01   ~ " **",
+    t_row$p_value < 0.05   ~ " *",
+    TRUE                   ~ ""
+  )
+  paste0("\u03c4 = ", round(t_row$tau, 3),
+         "  |  Sen slope = ", signif(t_row$sen_slope, 4), " fraction/yr",
+         "  |  p = ", round(t_row$p_value, 4), sig_flag,
+         "  |  n = ", t_row$n_years, " years")
+} else {
+  "Insufficient record for trend test (\u226520 years required)"
+}
+
+am_clean <- dplyr::filter(site_am, !is.na(am_rain_frac))
+sen_line <- if (nrow(site_trend) > 0 && nrow(am_clean) > 0) {
+  t_row  <- site_trend[1, ]
+  intcpt <- stats::median(am_clean$am_rain_frac - t_row$sen_slope * am_clean$water_year, na.rm = TRUE)
+  wy_min <- min(am_clean$water_year)
+  wy_max <- max(am_clean$water_year)
+  data.frame(wy_min = wy_min, wy_max = wy_max,
+             y_min = intcpt + t_row$sen_slope * wy_min,
+             y_max = intcpt + t_row$sen_slope * wy_max)
+} else NULL
+
+present_labels_rf <- unique(site_am$flood_label[!is.na(site_am$flood_label)])
+color_vec_rf <- site_type_colors[names(site_type_colors) %in% present_labels_rf]
+
+ggplot(site_am, aes(x = water_year, y = am_rain_frac, colour = flood_label)) +
+  geom_point(size = 2.5, alpha = 0.85, na.rm = TRUE) +
+  { if (!is.null(sen_line))
+      geom_segment(data = sen_line, aes(x = wy_min, xend = wy_max, y = y_min, yend = y_max),
+                   colour = "grey20", linewidth = 1.1, inherit.aes = FALSE) } +
+  scale_colour_manual(values = color_vec_rf, name = NULL) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    title    = "Annual Maximum Rain Fraction by Water Year",
+    subtitle = paste0(sub_txt, "\nStation ", EXAMPLE_SITE, " \u2014 example of dashboard's Trends tab"),
+    x = "Water Year", y = "Annual Maxima Rain Fraction"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position  = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.subtitle    = element_text(size = 11, face = "italic")
+  )
+
+ggsave(file.path(fig_dir, "example_site_rain_fraction_trend.png"), width = 6.5, height = 4.5, units = "in")
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51

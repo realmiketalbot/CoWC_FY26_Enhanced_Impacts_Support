@@ -1,10 +1,19 @@
+<<<<<<< HEAD
 # r-conda environment
+=======
+# r-cowc environment
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 
 ## Setup
 
 ```
+<<<<<<< HEAD
 conda env create -f _environments/r-conda-no-builds.yml
 conda activate r-conda
+=======
+conda env create -f _environments/r-cowc-no-builds.yml
+conda activate r-cowc
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 ```
 
 In R, from the project root:
@@ -45,6 +54,10 @@ script is a workaround, not a fix.
 
 ## Files
 
+<<<<<<< HEAD
 - `r-conda.yml` — conda environment spec
+=======
+- `r-cowc.yml` — conda environment spec
+>>>>>>> ed86e0dbeba2b3cceef4c6c9e94a61400a872d51
 - `../renv.lock` — R package versions
 - `fix_renv_rpaths.sh` — reapplies RPATH fix after arrow/sf reinstalls

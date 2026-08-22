@@ -4,7 +4,7 @@
 # extract_usgs_unit_data_peaks.R
 #
 # Find all independent POT peaks for selected unit-data stations.
-# Implements independence criteria from Livneh et al. 2024.
+# Implements independence criteria from Lang et al. 1999.
 # All independent peaks are retained for later flood type classification
 # and per-type GPD fitting (following Yu et al. 2022).
 #
@@ -38,46 +38,67 @@ output_file           <- "_data/pot_peaks_all.rds"
 q_threshold <- 0.5   # quantile of daily max flow used as PoT threshold / GPD mu
 
 # ============================================================================
-# FUNCTION: Independence criteria from Livneh et al. 2024
+# FUNCTION: Independence criteria from Lang et al. (1999)
 #
 # Applies two criteria to decluster candidate peaks for a single watershed:
-#   1. Minimum time separation: theta > 5 + ln(1.6092 * A), A in km²
+#   1. Minimum time separation: theta > 5 + ln(0.3861 * A), A in km²
+#      (Lang et al. state the criterion with A in miles²; 0.3861 converts km²)
 #   2. Inter-peak recession: flow between peaks must drop below 75% of the
 #      lesser of the two peak flows
+#
+# Candidates are considered in descending order of magnitude so that when two
+# peaks are dependent, the LARGER is retained. A peak is accepted only if it
+# is independent of every peak already accepted.
 # ============================================================================
 find_independent_peaks <- function(peak_df, all_flows_df, watershed_drain_sqkm) {
 
   if (nrow(peak_df) < 2) return(peak_df)
 
-  min_sep_days <- 5 + log(1.6092 * watershed_drain_sqkm)
+  min_sep_days <- 5 + log(0.3861 * watershed_drain_sqkm)
 
-  independent_peak_indices <- 1L
-  last_kept_index          <- 1L
+  # order of consideration: largest first
+  order_by_size <- order(peak_df$q_daily_max, decreasing = TRUE)
 
-  for (i in 2:nrow(peak_df)) {
+  kept <- integer(0)
 
-    current_peak   <- peak_df[i, ]
-    last_kept_peak <- peak_df[last_kept_index, ]
+  for (i in order_by_size) {
 
-    time_diff <- as.numeric(current_peak$date - last_kept_peak$date)
+    candidate <- peak_df[i, ]
+    is_independent <- TRUE
 
-    if (time_diff >= min_sep_days) {
+    for (j in kept) {
+
+      accepted <- peak_df[j, ]
+
+      time_diff <- abs(as.numeric(candidate$date - accepted$date))
+
+      # criterion 1: minimum separation
+      if (time_diff < min_sep_days) {
+        is_independent <- FALSE
+        break
+      }
+
+      # criterion 2: recession between the two peaks
+      d1 <- min(candidate$date, accepted$date)
+      d2 <- max(candidate$date, accepted$date)
 
       min_flow_between <- all_flows_df %>%
-        filter(date > last_kept_peak$date & date < current_peak$date) %>%
+        filter(date > d1, date < d2) %>%
         summarize(min_val = min(q_daily_max, na.rm = TRUE)) %>%
         pull(min_val)
 
-      min_of_peaks <- min(current_peak$q_daily_max, last_kept_peak$q_daily_max)
+      min_of_peaks <- min(candidate$q_daily_max, accepted$q_daily_max)
 
-      if (isTRUE(min_flow_between < 0.75 * min_of_peaks)) {
-        independent_peak_indices <- c(independent_peak_indices, i)
-        last_kept_index <- i
+      if (!isTRUE(min_flow_between < 0.75 * min_of_peaks)) {
+        is_independent <- FALSE
+        break
       }
     }
+
+    if (is_independent) kept <- c(kept, i)
   }
 
-  peak_df[independent_peak_indices, ]
+  peak_df[sort(kept), ]
 }
 
 # ============================================================================
@@ -188,14 +209,14 @@ message(sprintf(
 ))
 
 # ============================================================================
-# MINIMUM SEPARATION WINDOW (Livneh et al. 2024)
-# theta = 5 + ln(1.6092 * A), A in km²
+# MINIMUM SEPARATION WINDOW (Lang et al. 1999)
+# theta = 5 + ln(0.3861 * A), A in km²
 # ============================================================================
 search_window <- basin_meta %>%
   filter(site_no %in% unique(all_flows$site_no)) %>%
   transmute(
     site_no,
-    search_radius = as.integer(pmax(1L, ceiling(5 + log(1.6092 * drain_sqkm))))
+    search_radius = as.integer(pmax(1L, ceiling(5 + log(0.3861 * drain_sqkm))))
   )
 
 # ============================================================================
@@ -217,7 +238,7 @@ candidate_peaks <- all_flows %>%
   arrange(site_no, date)
 
 # ============================================================================
-# DECLUSTER PEAKS USING LIVNEH ET AL. INDEPENDENCE CRITERIA
+# DECLUSTER PEAKS USING LANG ET AL. INDEPENDENCE CRITERIA
 # ============================================================================
 independent_peaks <- candidate_peaks %>%
   group_by(site_no, drain_sqkm) %>%
@@ -276,9 +297,10 @@ buffered_dates <- independent_peaks %>%
   group_by(site_no) %>%
   arrange(date, .by_group = TRUE) %>%
   mutate(
-    peak_id = row_number(),
-    start   = date - search_radius,
-    end     = date + search_radius
+    peak_id   = row_number(),
+    peak_date = date,              # keep the peak's own date
+    start     = date - search_radius,
+    end       = date + search_radius
   ) %>%
   ungroup() %>%
   left_join(range_df, by = "site_no") %>%
@@ -286,22 +308,17 @@ buffered_dates <- independent_peaks %>%
     start = pmax(start, min_date),
     end   = pmin(end,   max_date)
   ) %>%
-  select(site_no, peak_id, start, end) %>%
+  select(site_no, peak_id, peak_date, start, end) %>%
   mutate(date = map2(start, end, ~ seq(.x, .y, by = "day"))) %>%
-  select(site_no, peak_id, date) %>%
+  select(site_no, peak_id, peak_date, date) %>%
   unnest(date) %>%
-  distinct(site_no, date)
-
-## Re-derive peak_id by detecting gaps in the buffered date sequence
-buffered_windows <- buffered_dates %>%
-  group_by(site_no) %>%
-  arrange(date, .by_group = TRUE) %>%
-  mutate(
-    gap_days = as.integer(date - lag(date)),
-    peak_id  = cumsum(is.na(gap_days) | gap_days > 1L)
-  ) %>%
-  select(-gap_days) %>%
+  # resolve overlaps: a day claimed by two windows goes to the nearer peak
+  group_by(site_no, date) %>%
+  slice_min(abs(as.numeric(date - peak_date)), n = 1, with_ties = FALSE) %>%
   ungroup() %>%
+  select(site_no, peak_id, date)
+
+buffered_windows <- buffered_dates %>%
   mutate(peak_id = as.factor(as.character(peak_id)))
 
 # ============================================================================
