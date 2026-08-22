@@ -375,7 +375,7 @@ run_site_method <- function(site, method_name, method_cfg, regulated) {
 # PARALLELISED EXECUTION
 # ============================================================================
 message(sprintf("Starting parallel FFA with %d workers...", N_WORKERS))
-plan(multicore, workers = N_WORKERS)
+plan(multisession, workers = N_WORKERS)
 
 jobs <- expand.grid(
   site        = all_sites,

@@ -1,7 +1,31 @@
 {
   "bioconductor.version": null,
-  "external.libraries": [],
-  "ignored.packages": [],
+  "external.libraries": [
+    "/home/mtalbot/software/miniconda3/envs/r-cowc/lib/R/library"
+  ],
+  "ignored.packages": [
+    "sf",
+    "terra",
+    "arrow",
+    "s2",
+    "units",
+    "exactextractr",
+    "raster",
+    "xml2",
+    "openssl",
+    "curl",
+    "igraph",
+    "ragg",
+    "systemfonts",
+    "textshaping",
+    "data.table",
+    "fst",
+    "stringi",
+    "readxl",
+    "bit64",
+    "V8",
+    "rsvg"
+  ],
   "lockfile.sanitize": true,
   "package.dependency.fields": [
     "Imports",
@@ -13,7 +37,7 @@
   "r.version": null,
   "snapshot.dev": false,
   "snapshot.type": "implicit",
-  "use.cache": true,
+  "use.cache": false,
   "vcs.ignore.cellar": true,
   "vcs.ignore.library": true,
   "vcs.ignore.local": true,

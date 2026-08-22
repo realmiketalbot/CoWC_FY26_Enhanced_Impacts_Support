@@ -42,5 +42,5 @@ dependencies:
   - r-pdp
   - r-iml
 
-  # install manually as needed: tidyterra, hydrogof, topsis, emoa, exactextractr, future, furrr
+  # install manually as needed: tidyterra, hydroGOF, topsis, emoa, exactextractr, future, furrr
   # e.g., install.packages(c("tidyterra", "exactextractr", "furrr"))

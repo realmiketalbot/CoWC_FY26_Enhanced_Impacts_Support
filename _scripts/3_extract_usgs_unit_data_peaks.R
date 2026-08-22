@@ -56,40 +56,46 @@ find_independent_peaks <- function(peak_df, all_flows_df, watershed_drain_sqkm) 
 
   min_sep_days <- 5 + log(0.3861 * watershed_drain_sqkm)
 
-  # order of consideration: largest first
-  order_by_size <- order(peak_df$q_daily_max, decreasing = TRUE)
+  # pull to plain vectors once; avoid dplyr overhead in the inner loop
+  flow_dates <- all_flows_df$date
+  flow_vals  <- all_flows_df$q_daily_max
+  ord        <- order(flow_dates)
+  flow_dates <- flow_dates[ord]
+  flow_vals  <- flow_vals[ord]
 
+  pk_date <- peak_df$date
+  pk_flow <- peak_df$q_daily_max
+
+  order_by_size <- order(pk_flow, decreasing = TRUE)
   kept <- integer(0)
 
   for (i in order_by_size) {
 
-    candidate <- peak_df[i, ]
     is_independent <- TRUE
 
     for (j in kept) {
 
-      accepted <- peak_df[j, ]
+      time_diff <- abs(as.numeric(pk_date[i] - pk_date[j]))
 
-      time_diff <- abs(as.numeric(candidate$date - accepted$date))
-
-      # criterion 1: minimum separation
+      # criterion 1: cheap, so check first
       if (time_diff < min_sep_days) {
         is_independent <- FALSE
         break
       }
 
-      # criterion 2: recession between the two peaks
-      d1 <- min(candidate$date, accepted$date)
-      d2 <- max(candidate$date, accepted$date)
+      # criterion 2: index into the sorted vectors, no table scan
+      d1 <- min(pk_date[i], pk_date[j])
+      d2 <- max(pk_date[i], pk_date[j])
+      lo <- findInterval(d1, flow_dates) + 1L
+      hi <- findInterval(d2 - 1, flow_dates)
 
-      min_flow_between <- all_flows_df %>%
-        filter(date > d1, date < d2) %>%
-        summarize(min_val = min(q_daily_max, na.rm = TRUE)) %>%
-        pull(min_val)
+      if (hi >= lo) {
+        min_flow_between <- min(flow_vals[lo:hi], na.rm = TRUE)
+      } else {
+        min_flow_between <- Inf   # no days between; treat as dependent
+      }
 
-      min_of_peaks <- min(candidate$q_daily_max, accepted$q_daily_max)
-
-      if (!isTRUE(min_flow_between < 0.75 * min_of_peaks)) {
+      if (!isTRUE(min_flow_between < 0.75 * min(pk_flow[i], pk_flow[j]))) {
         is_independent <- FALSE
         break
       }
