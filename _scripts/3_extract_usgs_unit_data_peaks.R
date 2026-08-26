@@ -4,14 +4,42 @@
 # extract_usgs_unit_data_peaks.R
 #
 # Find all independent POT peaks for selected unit-data stations.
-# Implements independence criteria from Lang et al. 1999.
+# Implements independence criteria from USWRC (1976), as reviewed in
+# Lang et al. (1999).
 # All independent peaks are retained for later flood type classification
 # and per-type GPD fitting (following Yu et al. 2022).
 #
-# Key addition vs. previous version: the per-site PoT threshold
-# (q_threshold quantile of daily max flow over the full record) is saved
-# as `pot_threshold_cfs` in the output. This value is used as the fixed
-# GPD location parameter mu in downstream fitting, following Yu et al. 2022.
+# The per-site PoT threshold (q_threshold quantile of daily max flow over the
+# full record) is saved as `pot_threshold_cfs` in the output. This value is
+# used as the fixed GPD location parameter mu in downstream fitting,
+# following Yu et al. 2022.
+#
+# CHANGE FROM PREVIOUS VERSION -----------------------------------------------
+# Peak identification is now a three-stage process:
+#
+#   1. Local maxima are detected across the full daily series using
+#      pracma::findpeaks, with NO threshold applied.
+#   2. Local maxima are filtered to those exceeding the per-site PoT
+#      threshold.
+#   3. The USWRC independence criteria are applied by find_independent_peaks().
+#
+# Previously, stage 1 segmented the record into runs of consecutive days above
+# the threshold and kept one maximum per run. At a median-flow threshold those
+# runs span a large fraction of the record: a network-wide diagnostic found a
+# median of 82% of above-threshold days sitting in runs longer than 2*theta,
+# with maximum run lengths exceeding 1000 days. Any additional peak inside a
+# long run was therefore discarded before declustering could evaluate it, and
+# declustering can only remove peaks, never recover them.
+#
+# Detecting local maxima before applying the threshold means no candidate is
+# eliminated by an arbitrary segmentation; the threshold and the independence
+# criteria do all of the filtering, in that order.
+#
+# find_independent_peaks() has also been optimised to compare each candidate
+# only against its immediate date-neighbours among already-accepted peaks.
+# This returns an identical peak set (see the note above the function) but
+# reduces complexity from O(n*k) to O(n log k), which matters because stage 1
+# now presents far more candidates than run segmentation did.
 #
 # INPUTS:
 #   - selected_unit_stations.csv   : site_no column of selected stations
@@ -26,6 +54,7 @@
 # ============================================================================
 
 library(tidyverse)
+library(pracma)
 
 # ============================================================================
 # CONFIGURATION
@@ -37,74 +66,172 @@ output_file           <- "_data/pot_peaks_all.rds"
 
 q_threshold <- 0.5   # quantile of daily max flow used as PoT threshold / GPD mu
 
+# findpeaks shape parameters. nups/ndowns = 1 is the minimal definition of a
+# local maximum (one rise before, one fall after). Raising them requires a
+# more sustained rise and recession and yields fewer, cleaner candidates.
+NUPS   <- 1
+NDOWNS <- 1
+
 # ============================================================================
-# FUNCTION: Independence criteria from Lang et al. (1999)
+# FUNCTION: Independence criteria from USWRC (1976), per Lang et al. (1999)
 #
 # Applies two criteria to decluster candidate peaks for a single watershed:
 #   1. Minimum time separation: theta > 5 + ln(0.3861 * A), A in km²
-#      (Lang et al. state the criterion with A in miles²; 0.3861 converts km²)
+#      (the criterion is stated with A in miles²; 0.3861 converts from km²)
 #   2. Inter-peak recession: flow between peaks must drop below 75% of the
 #      lesser of the two peak flows
 #
 # Candidates are considered in descending order of magnitude so that when two
-# peaks are dependent, the LARGER is retained. A peak is accepted only if it
-# is independent of every peak already accepted.
+# peaks are dependent, the LARGER is retained.
+#
+# OPTIMISATION: a candidate is compared only against its immediate date-
+# neighbours in the set of already-accepted peaks, rather than against every
+# accepted peak. This returns the identical peak set. Let i be the candidate
+# and m its nearest accepted neighbour on one side, and let k be any farther
+# accepted peak on that same side. If i passes both criteria against m:
+#
+#   Separation:  |t_k - t_i| > |t_m - t_i| >= theta, so criterion 1 holds.
+#
+#   Recession:   the minimum flow over a longer interval is no greater than
+#                over any sub-interval, so
+#                  min(k,i) <= min(m,i) < 0.75 * min(Q_m, Q_i) <= 0.75 * Q_i
+#                and, because k and m were both accepted and therefore satisfy
+#                the criterion between themselves,
+#                  min(k,i) <= min(k,m) < 0.75 * min(Q_k, Q_m) <= 0.75 * Q_k
+#                Together: min(k,i) < 0.75 * min(Q_k, Q_i), so criterion 2
+#                holds as well.
+#
+# Independence from the immediate neighbours therefore implies independence
+# from every accepted peak beyond them.
 # ============================================================================
 find_independent_peaks <- function(peak_df, all_flows_df, watershed_drain_sqkm) {
 
-  if (nrow(peak_df) < 2) return(peak_df)
+  n <- nrow(peak_df)
+  if (n < 2) return(peak_df)
 
   min_sep_days <- 5 + log(0.3861 * watershed_drain_sqkm)
 
-  # pull to plain vectors once; avoid dplyr overhead in the inner loop
-  flow_dates <- all_flows_df$date
-  flow_vals  <- all_flows_df$q_daily_max
-  ord        <- order(flow_dates)
-  flow_dates <- flow_dates[ord]
-  flow_vals  <- flow_vals[ord]
+  # daily flow series, sorted once
+  ord        <- order(all_flows_df$date)
+  flow_dates <- all_flows_df$date[ord]
+  flow_vals  <- all_flows_df$q_daily_max[ord]
 
-  pk_date <- peak_df$date
-  pk_flow <- peak_df$q_daily_max
+  pk_date     <- peak_df$date
+  pk_date_num <- as.numeric(pk_date)
+  pk_flow     <- peak_df$q_daily_max
+
+  # minimum daily flow strictly between two dates; Inf if no days between
+  min_flow_between <- function(d1, d2) {
+    lo <- findInterval(d1, flow_dates) + 1L
+    hi <- findInterval(d2 - 1, flow_dates)
+    if (hi >= lo) min(flow_vals[lo:hi], na.rm = TRUE) else Inf
+  }
+
+  # TRUE if peaks i and j fail either independence criterion
+  is_dependent <- function(i, j) {
+
+    if (abs(pk_date_num[i] - pk_date_num[j]) < min_sep_days) return(TRUE)
+
+    d1 <- min(pk_date[i], pk_date[j])
+    d2 <- max(pk_date[i], pk_date[j])
+    mf <- min_flow_between(d1, d2)
+
+    !isTRUE(mf < 0.75 * min(pk_flow[i], pk_flow[j]))
+  }
 
   order_by_size <- order(pk_flow, decreasing = TRUE)
-  kept <- integer(0)
+
+  kept_idx   <- integer(0)   # indices into peak_df, held in DATE order
+  kept_dates <- numeric(0)   # matching dates, kept sorted for findInterval
 
   for (i in order_by_size) {
 
-    is_independent <- TRUE
+    di  <- pk_date_num[i]
+    pos <- findInterval(di, kept_dates)   # number of accepted dates <= di
 
-    for (j in kept) {
+    ok <- TRUE
 
-      time_diff <- abs(as.numeric(pk_date[i] - pk_date[j]))
-
-      # criterion 1: cheap, so check first
-      if (time_diff < min_sep_days) {
-        is_independent <- FALSE
-        break
-      }
-
-      # criterion 2: index into the sorted vectors, no table scan
-      d1 <- min(pk_date[i], pk_date[j])
-      d2 <- max(pk_date[i], pk_date[j])
-      lo <- findInterval(d1, flow_dates) + 1L
-      hi <- findInterval(d2 - 1, flow_dates)
-
-      if (hi >= lo) {
-        min_flow_between <- min(flow_vals[lo:hi], na.rm = TRUE)
-      } else {
-        min_flow_between <- Inf   # no days between; treat as dependent
-      }
-
-      if (!isTRUE(min_flow_between < 0.75 * min(pk_flow[i], pk_flow[j]))) {
-        is_independent <- FALSE
-        break
-      }
+    # nearest accepted peak at or before this date
+    if (pos >= 1L) {
+      ok <- !is_dependent(i, kept_idx[pos])
     }
 
-    if (is_independent) kept <- c(kept, i)
+    # nearest accepted peak after this date
+    if (ok && pos < length(kept_idx)) {
+      ok <- !is_dependent(i, kept_idx[pos + 1L])
+    }
+
+    if (ok) {
+      kept_idx   <- append(kept_idx,   i,  after = pos)
+      kept_dates <- append(kept_dates, di, after = pos)
+    }
   }
 
-  peak_df[sort(kept), ]
+  peak_df[sort(kept_idx), ]
+}
+
+# ============================================================================
+# FUNCTION: local maxima detection for one site
+#
+# pracma::findpeaks operates on vector position, not on dates, so the series
+# is first split into segments of consecutive calendar days. Without this, a
+# gap in the record would allow two observations months apart to be treated
+# as neighbours and produce a spurious local maximum at the gap edge.
+#
+# findpeaks returns a matrix whose columns are: peak height, index of the
+# peak, index where the rise begins, index where the fall ends. Only the
+# second column is used here. VERIFY this column order against the pracma
+# documentation for your installed version before trusting it network-wide.
+#
+# Segments shorter than nups + ndowns + 1 days cannot contain a local maximum
+# by this definition and are skipped.
+# ============================================================================
+find_local_maxima <- function(flow_df, n_ups = NUPS, n_downs = NDOWNS) {
+
+  flow_df <- flow_df %>%
+    filter(!is.na(q_daily_max)) %>%
+    arrange(date)
+
+  min_len <- n_ups + n_downs + 1L
+  if (nrow(flow_df) < min_len) return(flow_df[0, ])
+
+  gap     <- c(NA_real_, as.numeric(diff(flow_df$date), units = "days"))
+  segment <- cumsum(is.na(gap) | gap != 1)
+
+  map_dfr(unique(segment), function(s) {
+
+    seg <- flow_df[segment == s, ]
+    if (nrow(seg) < 1L) return(seg[0, ])
+
+    # padding: Pad each segment with a descending ramp on both sides so that a peak at
+    # the first or last observation can still be detected. Without padding,
+    # findpeaks requires n_downs falling values after a peak, so a peak
+    # immediately preceding a data gap is invisible -- a failure mode biased
+    # toward the largest floods, since gauges often fail during extreme events.     
+    
+    # # breaking ties: USGS daily values are rounded, so broad snowmelt crests
+    # frequently produce plateaus. findpeaks requires strict rises and falls,
+    # so a plateau is not recognised as a peak at all. A monotonic
+    # perturbation far below the data's precision resolves each plateau to
+    # its first day without altering any real ordering.
+
+    lo     <- min(seg$q_daily_max, na.rm = TRUE)
+
+    eps <- 1e-6 * max(seg$q_daily_max, na.rm = TRUE)
+    q_jit <- seg$q_daily_max - eps * seq_len(nrow(seg))
+
+    padded <- c(min(q_jit) - n_ups:1, q_jit, min(q_jit) - 1:n_downs)
+
+    pk <- pracma::findpeaks(padded, nups = n_ups, ndowns = n_downs)
+    if (is.null(pk)) return(seg[0, ])
+
+    # shift indices back onto the unpadded segment and drop anything that
+    # falls outside it
+    idx <- pk[, 2] - n_ups
+    idx <- idx[idx >= 1L & idx <= nrow(seg)]
+
+    seg[idx, ]
+  })
 }
 
 # ============================================================================
@@ -196,7 +323,8 @@ all_flows <- all_flows %>%
 # COMPUTE PER-SITE POT THRESHOLD
 #
 # The q_threshold quantile of daily max flow over the full record becomes:
-#   (a) the minimum flow a candidate peak must exceed, and
+#   (a) the minimum flow a local maximum must exceed to become a candidate,
+#       and
 #   (b) the GPD location parameter mu in downstream fitting (Yu et al. 2022).
 #
 # Saved separately so it can be joined into the output and used by app.R
@@ -215,7 +343,7 @@ message(sprintf(
 ))
 
 # ============================================================================
-# MINIMUM SEPARATION WINDOW (Lang et al. 1999)
+# MINIMUM SEPARATION WINDOW
 # theta = 5 + ln(0.3861 * A), A in km²
 # ============================================================================
 search_window <- basin_meta %>%
@@ -226,26 +354,40 @@ search_window <- basin_meta %>%
   )
 
 # ============================================================================
-# IDENTIFY CANDIDATE PEAKS OVER THRESHOLD
+# STAGE 1: DETECT LOCAL MAXIMA (no threshold applied)
 # ============================================================================
-candidate_peaks <- all_flows %>%
-  left_join(site_thresholds, by = "site_no") %>%
-  group_by(site_no) %>%
-  filter(q_daily_max > pot_threshold_cfs) %>%
-  arrange(date, .by_group = TRUE) %>%
-  mutate(
-    time_gap = as.numeric(date - lag(date), units = "days"),
-    event_id = cumsum(is.na(time_gap) | time_gap > 1)
-  ) %>%
-  group_by(site_no, event_id) %>%
-  slice_max(order_by = q_daily_max, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  select(-time_gap, -event_id, -pot_threshold_cfs) %>%
-  arrange(site_no, date)
+message("Stage 1: detecting local maxima with pracma::findpeaks ...")
+
+sites_present <- unique(all_flows$site_no)
+
+local_maxima <- map_dfr(sites_present, function(s) {
+  find_local_maxima(filter(all_flows, site_no == s))
+})
+
+message(sprintf("  %d local maxima across %d sites (%.1f%% of all site-days)",
+                nrow(local_maxima), n_distinct(local_maxima$site_no),
+                100 * nrow(local_maxima) / nrow(all_flows)))
 
 # ============================================================================
-# DECLUSTER PEAKS USING LANG ET AL. INDEPENDENCE CRITERIA
+# STAGE 2: FILTER TO LOCAL MAXIMA ABOVE THE PoT THRESHOLD
 # ============================================================================
+candidate_peaks <- local_maxima %>%
+  left_join(site_thresholds, by = "site_no") %>%
+  filter(q_daily_max > pot_threshold_cfs) %>%
+  select(-pot_threshold_cfs) %>%
+  arrange(site_no, date)
+
+message(sprintf(
+  "Stage 2: %d local maxima exceed the per-site PoT threshold (%.1f%% retained)",
+  nrow(candidate_peaks),
+  100 * nrow(candidate_peaks) / nrow(local_maxima)
+))
+
+# ============================================================================
+# STAGE 3: DECLUSTER USING USWRC INDEPENDENCE CRITERIA
+# ============================================================================
+message("Stage 3: applying independence criteria ...")
+
 independent_peaks <- candidate_peaks %>%
   group_by(site_no, drain_sqkm) %>%
   group_modify(~ find_independent_peaks(
@@ -255,8 +397,11 @@ independent_peaks <- candidate_peaks %>%
   )) %>%
   ungroup()
 
-message(sprintf("Found %d independent peaks across %d sites",
-                nrow(independent_peaks), n_distinct(independent_peaks$site_no)))
+message(sprintf(
+  "Found %d independent peaks across %d sites (%.1f%% of candidates retained)",
+  nrow(independent_peaks), n_distinct(independent_peaks$site_no),
+  100 * nrow(independent_peaks) / nrow(candidate_peaks)
+))
 
 # ============================================================================
 # ANTECEDENT RUNOFF VOLUME PER PEAK (mm over basin area)
@@ -328,19 +473,28 @@ buffered_windows <- buffered_dates %>%
   mutate(peak_id = as.factor(as.character(peak_id)))
 
 # ============================================================================
-# IDENTIFY PEAK DATE AND FLOW WITHIN EACH WINDOW
+# ATTACH PEAK DATE AND FLOW
+#
+# The peak is taken directly from the declustered set rather than recomputed
+# as the maximum within the buffered window. Recomputing was wrong: the
+# window spans +/- search_radius days, so on a rising limb the window maximum
+# can fall on a day belonging to a different, larger event. That relocated
+# both the date and the magnitude of the retained peak, inflating the flows
+# entering the GPD fits and shifting the antecedent window used for
+# classification.
+#
+# peak_id is assigned exactly as in buffered_dates (row number within site,
+# in date order) so the join keys correspond.
 # ============================================================================
 flows_in_windows <- all_flows %>%
   inner_join(buffered_windows, by = c("site_no", "date"))
 
-peak_info <- flows_in_windows %>%
-  group_by(site_no, peak_id) %>%
-  slice_max(order_by = q_daily_max, n = 1, with_ties = FALSE) %>%
-  summarize(
-    peak_date = date,
-    peak_flow = q_daily_max,
-    .groups   = "drop"
-  ) %>%
+peak_info <- independent_peaks %>%
+  select(site_no, peak_date = date, peak_flow = q_daily_max) %>%
+  group_by(site_no) %>%
+  arrange(peak_date, .by_group = TRUE) %>%
+  mutate(peak_id = as.factor(as.character(row_number()))) %>%
+  ungroup() %>%
   left_join(site_thresholds, by = "site_no")   # attach mu for downstream use
 
 # ============================================================================
@@ -372,12 +526,105 @@ pot_windows <- flows_in_windows %>%
 saveRDS(pot_windows, output_file)
 message(sprintf("\nSaved POT windows to %s", output_file))
 
-pot_windows %>%
+site_summary <- pot_windows %>%
   group_by(site_no) %>%
   summarize(
     n_peaks           = n_distinct(peak_id),
+    n_years           = n_distinct(lubridate::year(peak_date)),
+    peaks_per_year    = n_peaks / n_years,
     pot_threshold_cfs = first(pot_threshold_cfs),
     .groups           = "drop"
   ) %>%
-  arrange(n_peaks) %>%
-  print(n = Inf)
+  arrange(n_peaks)
+
+print(site_summary, n = Inf)
+
+# mean peaks per year, for comparison against Lang et al.'s mu > 2-3 guidance
+cat("\nPeaks per year (mu): median",
+    round(median(site_summary$peaks_per_year), 2),
+    "| min", round(min(site_summary$peaks_per_year), 2),
+    "| max", round(max(site_summary$peaks_per_year), 2), "\n")
+
+# ============================================================================
+# COMPARE AGAINST PREVIOUS METHODOLOGY
+# ============================================================================
+pot_windows_old <- readRDS("_data/_archive/pot_peaks_all_extraction_threshold_version.rds")
+
+# ============================================================================
+# Compare new (findpeaks) vs. old (run-segmentation) peak extraction
+# Requires: pot_windows, pot_windows_old
+# ============================================================================
+
+peaks_new <- pot_windows     %>% distinct(site_no, peak_date, peak_flow)
+peaks_old <- pot_windows_old %>% distinct(site_no, peak_date, peak_flow)
+
+# --- Counts ----------------------------------------------------------------
+
+counts <- full_join(
+  peaks_new %>% count(site_no, name = "n_new"),
+  peaks_old %>% count(site_no, name = "n_old"),
+  by = "site_no"
+) %>%
+  mutate(across(c(n_new, n_old), ~ replace_na(.x, 0L)),
+         ratio = n_new / n_old) %>%
+  arrange(desc(ratio))
+
+cat("Total peaks  new:", nrow(peaks_new), " old:", nrow(peaks_old),
+    " ratio:", round(nrow(peaks_new) / nrow(peaks_old), 2), "\n")
+cat("Per-site ratio   median:", round(median(counts$ratio, na.rm = TRUE), 2),
+    " min:", round(min(counts$ratio, na.rm = TRUE), 2),
+    " max:", round(max(counts$ratio, na.rm = TRUE), 2), "\n")
+cat("Sites with fewer peaks than before:", sum(counts$ratio < 1), "\n\n")
+
+# --- Overlap: which old peaks survived, which new ones are recovered --------
+
+overlap <- full_join(
+  peaks_new %>% mutate(in_new = TRUE),
+  peaks_old %>% mutate(in_old = TRUE),
+  by = c("site_no", "peak_date")
+) %>%
+  mutate(across(c(in_new, in_old), ~ replace_na(.x, FALSE)))
+
+cat("Old peaks retained in new:", sum(overlap$in_new & overlap$in_old),
+    "of", nrow(peaks_old),
+    sprintf("(%.1f%%)", 100 * sum(overlap$in_new & overlap$in_old) / nrow(peaks_old)), "\n")
+cat("Old peaks now dropped    :", sum(!overlap$in_new & overlap$in_old), "\n")
+cat("New peaks recovered      :", sum(overlap$in_new & !overlap$in_old), "\n\n")
+
+# --- Are recovered peaks large enough to matter for the tail? --------------
+# If the recovered peaks are all small, the extraction change thins the bulk
+# without affecting upper-tail quantiles.
+
+recovered <- overlap %>%
+  filter(in_new, !in_old) %>%
+  select(site_no, peak_date, peak_flow = peak_flow.x)
+
+rank_within_site <- peaks_new %>%
+  group_by(site_no) %>%
+  mutate(pct_rank = percent_rank(peak_flow)) %>%
+  ungroup() %>%
+  inner_join(recovered %>% select(site_no, peak_date), by = c("site_no", "peak_date"))
+
+cat("Recovered peaks, percentile rank within the new site sample:\n")
+print(summary(rank_within_site$pct_rank))
+cat("Recovered peaks in the top 10% at their site:",
+    sum(rank_within_site$pct_rank > 0.9), "\n\n")
+
+# --- Sanity check: the largest peak at each site should not change ----------
+
+max_check <- full_join(
+  peaks_new %>% group_by(site_no) %>% slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
+    ungroup() %>% select(site_no, max_new = peak_flow, date_new = peak_date),
+  peaks_old %>% group_by(site_no) %>% slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
+    ungroup() %>% select(site_no, max_old = peak_flow, date_old = peak_date),
+  by = "site_no"
+) %>%
+  mutate(differs = max_new != max_old | date_new != date_old)
+
+cat("Sites where the largest peak changed:", sum(max_check$differs, na.rm = TRUE),
+    "of", nrow(max_check), "\n")
+if (any(max_check$differs, na.rm = TRUE)) print(filter(max_check, differs), n = 20)
+
+# --- Per-site table --------------------------------------------------------
+
+print(counts, n = 20)
