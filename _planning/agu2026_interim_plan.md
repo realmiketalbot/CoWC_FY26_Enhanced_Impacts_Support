@@ -6,8 +6,8 @@
 > **Deadline:** poster print in ~2 weeks (target ≈ 2026-12-01)
 > **Status (2026-11-17):** Phase 0 done (tags). Phase U done: the HPC rerun of Scripts 3 → 9 passed
 > all 37 invariant checks, and the regenerated files are synced to the laptop (not yet committed).
-> **Blocking Phase F:** D-E is reopened (see §6). Script 3 now writes month-level coverage; rerun
-> Script 3 only and inspect where the gaps fall. Script 7 and `report_figures.R` won't run against
+> **Blocking Phase F:** station re-screen and D-E (see §6). Next: run the rewritten Script 2 on the
+> HPC, inspect where coverage gaps fall, then write Script 2b's selection rule. Script 7 and `report_figures.R` won't run against
 > the new outputs until Phase F (they still read the removed top-*n* columns).
 
 ## 1. The stopping point
@@ -186,6 +186,21 @@ If the gaps are seasonal (e.g., ice-affected winter records), the days-based den
 now also writes `site_month_coverage.rds` (site × water year × month). Once it's rerun, inspect where
 the gaps fall. The likely replacement: a water year counts as observed when its flood season is
 ≥ 90% observed, used for both λ and the dispersion index.
+
+**Station re-screen (decided 2026-11-17).** The old Script 2 "completeness" was an approval
+share, (obs flagged "A") / (obs present), on calendar years. It never counted missing data, so the
+206-site rule ("100% in 2022 and 20+ consecutive 100% years") was not a coverage screen. Decisions:
+
+- **Full re-screen** of all Colorado GAGES-II sites with unit data, on true coverage.
+- **Keep regulated sites** (143 of the current 206). No regulated/unregulated distinction has
+  shown up in the results so far. Regulation stays a stratifying variable.
+
+Pipeline: Script 2 (HPC) writes `_data/usgs_unit_coverage_co.rds` (site × water year × month).
+Script 2b (local) applies the selection rule and writes `selected_unit_stations.csv`. The rule is
+set after inspecting where gaps fall. The same flood-season definition then gives λ's denominator
+and the dispersion index's M, which settles D-E. Then rerun 3 → 0 → 1 → 5 → 6a/6b → 8 → 9. Script 4
+already extracts WLDAS for every Colorado GAGES-II basin, so added sites need no new extraction. The
+invariant check needs a site-aware update, since the site list changes.
 
 **Site-count preference (user, 2026-11-17):** a smaller final set of watersheds is acceptable if it
 improves analysis quality. Record-quality screens (e.g., a minimum number of observed flood-season
