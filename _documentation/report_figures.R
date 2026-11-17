@@ -2,6 +2,8 @@
 library(tidyverse)
 library(ggpattern)
 library(legendry)
+library(patchwork)
+library(colorspace)
 library(tigris)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -74,6 +76,7 @@ ggplot() +
   ggplot2::theme(legend.position = "right")
 
 ggsave(file.path(fig_dir, "study_area_map.png"), width = 6.5, height = 4.5, units = "in")
+
 
 ### Figure: Histogram of rain fraction (population-level) ----
 plot_data <- peaks_frac %>%
@@ -1039,3 +1042,4 @@ ggplot(site_am, aes(x = water_year, y = am_rain_frac, colour = flood_label)) +
   )
 
 ggsave(file.path(fig_dir, "example_site_rain_fraction_trend.png"), width = 6.5, height = 4.5, units = "in")
+
