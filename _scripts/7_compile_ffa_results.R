@@ -60,6 +60,12 @@ N_WORKERS      <- max(1L, min(parallelly::availableCores() - 1L, 32L))
 MIN_TYPE_COUNT <- 20L     # minimum exceedances for any fit (D-B)
 THRESH_RATE    <- 1       # interim rule: about one exceedance per qualifying year
 
+# Sensitivity runs (_documentation/poster_sensitivity.R) override these
+# through environment variables; with none set, the defaults below apply.
+THRESH_RATE     <- as.numeric(Sys.getenv("FFA_THRESH_RATE", THRESH_RATE))
+PEAKS_FRAC_FILE <- Sys.getenv("FFA_PEAKS_FRAC_FILE", "_data/pot_peaks_classified_frac_thresh_3class.rds")
+OUT_DIR         <- Sys.getenv("FFA_OUT_DIR", "_data")
+
 RI_GRID  <- c(2, 5, 10, 25, 50, 100, 200, 500)
 RI_DENSE <- c(seq(1.1, 2, 0.1), seq(2.5, 10, 0.5), seq(11, 500, 1))
 
@@ -68,7 +74,7 @@ RI_DENSE <- c(seq(1.1, 2, 0.1), seq(2.5, 10, 0.5), seq(11, 500, 1))
 # ============================================================================
 message("Loading inputs...")
 peaks_dav  <- readRDS("_data/pot_peaks_classified_depth_thresh.rds")
-peaks_frac <- readRDS("_data/pot_peaks_classified_frac_thresh_3class.rds")
+peaks_frac <- readRDS(PEAKS_FRAC_FILE)
 meta       <- readRDS("_data/site_metadata.rds") %>% select(site_no, regulated)
 qual       <- readRDS("_data/site_qualifying_years.rds") %>% filter(selected, qualifies)
 
@@ -171,16 +177,18 @@ params    <- gather("params",     c("site_no", "method", "curve_type"))
 class_sum <- gather("class_rows", c("site_no", "method", "flood_type"))
 
 run_config <- list(min_type_count = MIN_TYPE_COUNT, thresh_rate = THRESH_RATE,
+                   peaks_frac_file = PEAKS_FRAC_FILE,
                    threshold_rule = "select_threshold_rate (interim, D-A)",
                    qualifying_years = attr(readRDS("_data/site_qualifying_years.rds"), "selection_config"))
 for (nm in c("curves", "quantiles", "params")) {
   obj <- get(nm); attr(obj, "run_config") <- run_config; assign(nm, obj)
 }
 
-saveRDS(curves,    "_data/ffa_curves_pgpd.rds")
-saveRDS(quantiles, "_data/ffa_quantiles_pgpd.rds")
-saveRDS(params,    "_data/ffa_params_pgpd.rds")
-saveRDS(class_sum, "_data/ffa_classification_summary.rds")
+dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+saveRDS(curves,    file.path(OUT_DIR, "ffa_curves_pgpd.rds"))
+saveRDS(quantiles, file.path(OUT_DIR, "ffa_quantiles_pgpd.rds"))
+saveRDS(params,    file.path(OUT_DIR, "ffa_params_pgpd.rds"))
+saveRDS(class_sum, file.path(OUT_DIR, "ffa_classification_summary.rds"))
 
 # ============================================================================
 # SUMMARY
