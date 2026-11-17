@@ -118,9 +118,35 @@ if ("script5" %in% groups) {
                      keys = c("site_no", "peak_id", "lookback_day"), sites = common)
   record("Script 5: accum_curves_60d identical on common sites", r$pass, r$detail)
 
+  # endmember_type uses cutoffs that are percentiles over ALL sites (Script 5:
+  # rain/melt 25th and 50th percentiles of the 60-day totals), so like
+  # mixed_split it moves with the site set. Check the underlying values
+  # strictly, then require every label change to lie between an old and a new
+  # cutoff. Diagnostic only: no pipeline script or the App reads this file.
   eo <- read_baseline("endmembers_60d.rds"); en <- read_new("endmembers_60d.rds")
-  r <- same_on_sites(eo, en, keys = intersect(c("site_no", "peak_id"), names(eo)), sites = common)
-  record("Script 5: endmembers_60d identical on common sites", r$pass, r$detail)
+  r <- same_on_sites(eo, en, keys = c("site_no", "peak_id"), sites = common,
+                     exclude = "endmember_type")
+  record("Script 5: endmembers_60d values identical on common sites", r$pass, r$detail)
+
+  ENDMEMBER_PCTILE <- 0.25; PRIMARY_PCTILE <- 0.50   # as in Script 5
+  cuts <- function(d) c(
+    rl = quantile(d$total_rain_60d, ENDMEMBER_PCTILE,   names = FALSE, na.rm = TRUE),
+    rh = quantile(d$total_rain_60d, 1 - PRIMARY_PCTILE, names = FALSE, na.rm = TRUE),
+    ml = quantile(d$total_melt_60d, ENDMEMBER_PCTILE,   names = FALSE, na.rm = TRUE),
+    mh = quantile(d$total_melt_60d, 1 - PRIMARY_PCTILE, names = FALSE, na.rm = TRUE))
+  co <- cuts(eo); cn <- cuts(en)
+  em <- inner_join(
+    eo %>% mutate(peak_id = as.character(peak_id)) %>% filter(site_no %in% common) %>%
+      select(site_no, peak_id, total_rain_60d, total_melt_60d, old_type = endmember_type),
+    en %>% mutate(peak_id = as.character(peak_id)) %>% filter(site_no %in% common) %>%
+      select(site_no, peak_id, new_type = endmember_type),
+    by = c("site_no", "peak_id")) %>%
+    filter(old_type != new_type)
+  btw <- function(x, a, b) x >= min(a, b) & x <= max(a, b)
+  explained <- with(em, btw(total_rain_60d, co["rl"], cn["rl"]) | btw(total_rain_60d, co["rh"], cn["rh"]) |
+                        btw(total_melt_60d, co["ml"], cn["ml"]) | btw(total_melt_60d, co["mh"], cn["mh"]))
+  record("Script 5: every endmember_type change lies between an old and a new network cutoff",
+         all(explained), sprintf("%d labels changed", nrow(em)))
 }
 
 # ---------------------------------------------------------------------------

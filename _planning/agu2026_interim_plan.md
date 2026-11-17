@@ -8,8 +8,8 @@
 > original 206 sites. The station re-screen is done: Script 2 measured true coverage for 316 Colorado
 > GAGES-II sites, and Script 2b selected **215 sites** (May–Sep ≥ 90% observed and ≥ 95% approved,
 > ≥ 20 qualifying water years in WY1986–2023). D-E is settled (§6).
-> **Next:** on the HPC, rerun 3 → 0 → 1 → 5 → 6a/6b → 8 → 9 for the new site list, then the
-> site-aware invariant check. Phase F follows. Script 7 and `report_figures.R` won't run against the
+> **Phase U complete:** the 215-site HPC rerun (3 → 0 → 1 → 5 → 6a/6b → 8 → 9) passed the
+> site-aware invariant check (38 PASS, 0 FAIL, 4 INFO), and the data is committed. **Phase F in progress.** Script 7 and `report_figures.R` won't run against the
 > new outputs until Phase F (they still read the removed top-*n* columns).
 
 ## 1. The stopping point
