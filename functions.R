@@ -2,233 +2,114 @@
 ## top) so that scripts sourcing this file only for the shared utility
 ## helpers below are not forced to have lmomco installed.
 
-## ── GPD helpers (Yu et al. 2022 methodology) ─────────────────────────────────
+## ── Poisson–GPD helpers (Proposal Eq. 1.3–1.5 and App. A.1; Beguería 2005) ──
 ##
-## RI axis is the PoT recurrence interval: RI = 1 / EP where EP = 1 - F(x).
-## This matches Yu et al. Fig 2c/2d exactly (confirmed in their D&C section 5).
-## Their total PoT rate ≈ 1 event/yr so PoT RI ≈ annual RI numerically, but
-## the underlying quantity is PoT EP, not annual exceedance probability.
+## For flood type i with fitting threshold u_i:
+##   H_i(y)   GPD CDF of excesses y = x - u_i, fit by L-moments with the
+##            lower bound FIXED at 0: lmomco::pargpa(lmoms(y), xi = 0).
+##   lambda_i exceedances of u_i per qualifying water year (Script 2b).
+##   F_i(x) = exp(-lambda_i * (1 - H_i(x - u_i)))   annual-maximum CDF, x >= u_i
+##   T(x)   = 1 / (1 - F(x))                        ANNUAL return period
+## Mixture (Eq. 1.5): F_mix(x) = prod_i F_i(x). Below u_i, F_i is floored at
+## exp(-lambda_i) (decision D4). Quantiles are reported only where valid:
+## per type for x >= u_i, mixture for x >= max_i u_i; otherwise NA.
 ##
-## Mixture: F_mix(x) = prod_i F_i(x)  [Yu et al. Eq. 3, CDF product]
-## Per-type RI curve: RI = 1 / (1 - F_i(x)) = 1 / gpd_sf(x)
-## Empirical plotting positions: within-type Weibull, RI = (n+1)/rank
+## lmomco convention: pargpa() returns para = c(xi = location, alpha = scale,
+## kappa), with kappa = -shape in the Coles (2001) convention the proposal
+## uses. CDF and quantile evaluation goes through lmomco's cdfgpa()/quagpa()
+## so the sign convention is handled in one place.
+##
+## The initial-results fit_gpd() called pargpa() WITHOUT xi = 0, so lmomco
+## estimated a location from the excesses that the code then discarded
+## (plan §2). These helpers replace fit_gpd(), the LP3 helpers and the
+## family dispatch; the old code is at tag initial-results-prelim-proposal.
 
-fit_gpd <- function(x, dates, mu_threshold, min_n = 5) {
-  keep  <- is.finite(x) & x > 0
-  x     <- x[keep]
-  dates <- dates[keep]
-  if (length(x) < min_n) return(NULL)
-  n_years <- as.numeric(diff(range(dates))) / 365.25
-  if (n_years <= 0) return(NULL)
+## Interim fitting threshold (plan D-A, stand-in for EQD).
+## Rate-based: keep the k largest peaks, k = min(n, max(min_count,
+## round(rate * n_years))), the closest analogue to the Yu et al. (2022)
+## top-n sample. u is placed midway between the k-th largest peak and the
+## next lower DISTINCT peak value (or floor_u, the site's candidate
+## threshold, when no lower peak exists). Peaks tied with the k-th value are
+## therefore all included, so the returned k (the number of peaks above u)
+## can exceed the target slightly when there are ties.
+## Returns NULL when fewer than min_count peaks are available.
+select_threshold_rate <- function(x, n_years, floor_u, min_count = 20L, rate = 1) {
+  x <- sort(x[is.finite(x)], decreasing = TRUE)
+  n <- length(x)
+  k <- min(n, max(min_count, round(rate * n_years)))
+  if (k < min_count) return(NULL)
+  lower <- x[x < x[k]]
+  next_lower <- if (length(lower) > 0) lower[1] else min(floor_u, x[k])
+  u <- (x[k] + next_lower) / 2
+  list(u = u, k = sum(x > u), rule = sprintf("rate_%g_per_yr", rate))
+}
 
-  ## Fix mu at the site-wide PoT threshold, following Yu et al. 2022.
-  ## Shift exceedances to zero-origin; fit sigma and xi only.
-  mu <- mu_threshold
-  y  <- sort(x - mu); y <- y[y >= 0]
-  if (length(y) < min_n) return(NULL)
-
-  pars <- lmomco::pargpa(lmomco::lmoms(y))
-  if (is.null(pars$para) || anyNA(pars$para) || any(!is.finite(pars$para))) return(NULL)
+## Fit the Poisson–GPD to the peaks x above u, over n_years qualifying years.
+fit_pgpd <- function(x, u, n_years, min_n = 20L) {
+  y <- x[is.finite(x) & x > u] - u
+  if (length(y) < min_n || !is.finite(n_years) || n_years <= 0) return(NULL)
+  pars <- tryCatch(lmomco::pargpa(lmomco::lmoms(y), xi = 0), error = function(e) NULL)
+  if (is.null(pars) || anyNA(pars$para) || any(!is.finite(pars$para))) return(NULL)
   list(
-    family  = "gpd",
-    mu      = mu,
-    sigma   = pars$para["alpha"],
-    xi      = pars$para["kappa"] * -1,   # lmomco: kappa = -xi
-    n       = length(x),
-    n_years = n_years
+    u      = u,
+    n_exc  = length(y),
+    n_years = n_years,
+    lambda = length(y) / n_years,
+    sigma  = unname(pars$para["alpha"]),
+    xi     = -unname(pars$para["kappa"]),   # Coles (2001) shape
+    para   = pars
   )
 }
 
-## GPD survival function: P(X > x | X > mu)
-gpd_sf <- function(x, mu, sigma, xi) {
-  z     <- (x - mu) / sigma
-  inner <- 1 + xi * z
-  if (abs(xi) < 1e-8) pmax(0, exp(-z))
-  else pmax(0, ifelse(inner <= 0, 0, inner^(-1 / xi)))
+## Annual-maximum CDF of one Poisson–GPD fit, floored below u (D4).
+pgpd_cdf <- function(x, fit) {
+  h <- ifelse(x >= fit$u, lmomco::cdfgpa(pmax(x - fit$u, 0), fit$para), 0)
+  exp(-fit$lambda * (1 - h))
 }
 
-## GPD CDF: F(x) = 1 - S(x)
-gpd_cdf <- function(x, fit) 1 - gpd_sf(x, fit$mu, fit$sigma, fit$xi)
-
-## Invert GPD SF: given PoT exceedance probability p, return quantile
-gpd_quantile <- function(p, fit) {
-  if (abs(fit$xi) < 1e-8) fit$mu - fit$sigma * log(p)
-  else fit$mu + fit$sigma / fit$xi * (p^(-fit$xi) - 1)
+## Quantile at annual return period(s) T; NA where the quantile falls below u
+## (i.e., where -log(1 - 1/T) > lambda).
+pgpd_quantile <- function(T, fit) {
+  p_exc <- -log(1 - 1 / T) / fit$lambda       # = 1 - H(y_T)
+  q <- rep(NA_real_, length(T))
+  ok <- is.finite(p_exc) & p_exc <= 1 & p_exc > 0
+  q[ok] <- fit$u + lmomco::quagpa(1 - p_exc[ok], fit$para)
+  q
 }
 
-## PoT RI curve for a single GPD fit: RI = 1 / gpd_sf(x)
-gpd_curve <- function(fit, label, color,
-                      ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  ep <- 1 / ri
-  q  <- pmax(0, sapply(ep, gpd_quantile, fit = fit))
-  data.frame(ri = ri, ep = ep, q = q, label = label, color = color,
-             stringsAsFactors = FALSE)
+## Mixture annual-maximum CDF across a list of fits (Eq. 1.5).
+pgpd_mixture_cdf <- function(x, fits) Reduce(`*`, lapply(fits, function(f) pgpd_cdf(x, f)))
+
+## Mixture quantile(s) by root-finding; NA where the quantile would fall below
+## max_i u_i (D4) or the root cannot be bracketed.
+pgpd_mixture_quantile <- function(T, fits) {
+  lb <- max(vapply(fits, `[[`, numeric(1), "u"))
+  vapply(T, function(t) {
+    target <- 1 - 1 / t
+    if (pgpd_mixture_cdf(lb, fits) >= target) return(NA_real_)
+    ub <- max(lb * 2, lb + 1)
+    for (i in seq_len(60)) {
+      if (pgpd_mixture_cdf(ub, fits) >= target) break
+      ub <- lb + (ub - lb) * 2
+    }
+    if (pgpd_mixture_cdf(ub, fits) < target) return(NA_real_)
+    tryCatch(uniroot(function(x) pgpd_mixture_cdf(x, fits) - target,
+                     lower = lb, upper = ub, tol = 1e-6 * ub)$root,
+             error = function(e) NA_real_)
+  }, numeric(1))
 }
 
-## Mixture SF: S_mix(x) = 1 - prod_i F_i(x)  [Yu et al. Eq. 3]
-mixture_sf <- function(x, fits)
-  1 - Reduce("*", lapply(fits, function(f) gpd_cdf(x, f)))
-
-## Invert mixture SF to get PoT RI curve by uniroot.
-mixture_curve <- function(fits, ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  min_target <- min(1 / ri)
-  ub <- max(sapply(fits, function(f) gpd_quantile(min_target, f)),
-            na.rm = TRUE) * 2
-  ub <- max(ub, 1)
-  for (i in seq_len(30)) {
-    if (isTRUE(mixture_sf(ub, fits) < min_target)) break
-    ub <- ub * 2
-  }
-  q <- sapply(ri, function(r) {
-    target <- 1 / r
-    lb     <- min(sapply(fits, function(f) f$mu), na.rm = TRUE)
-    f_lb   <- mixture_sf(lb, fits) - target
-    f_ub   <- mixture_sf(ub, fits) - target
-    if (is.na(f_lb) || is.na(f_ub) || sign(f_lb) == sign(f_ub)) return(NA_real_)
-    tryCatch(
-      uniroot(function(x) mixture_sf(x, fits) - target,
-              lower = lb, upper = ub, tol = 0.1)$root,
-      error = function(e) NA_real_
-    )
-  })
-  data.frame(ri = ri, ep = 1 / ri, q = pmax(0, q),
-             label = "Mixture", color = "black",
-             stringsAsFactors = FALSE)
-}
-
-## ── LP3 helpers (Yu et al. 2022, Equations S1–S3) ────────────────────────────
+## ── Empirical annual return periods for exceedances ─────────────────────────
 ##
-## LP3 is fit to log(x) via L-moments, following Yu et al. 2022 and
-## Asquith et al. (2017). Parameters are estimated on the log scale:
-##   mu_log    = mean of log(x)       [location]
-##   sigma_log = scale of log(x)      [spread]
-##   gamma     = shape of log(x)      [skewness]
-##
-## RI axis for LP3 is annual exceedance probability: RI = 1 / AEP.
-## This differs conceptually from PoT RI used in GPD, but is numerically
-## similar when the PoT rate ≈ 1 event/yr (as in Yu et al.).
-##
-## Mixture: same CDF product as GPD [Yu et al. Eq. 3], inverted numerically.
-
-fit_lp3 <- function(x, dates, min_n = 5) {
-  keep  <- is.finite(x) & x > 0
-  x     <- x[keep]
-  dates <- dates[keep]
-  if (length(x) < min_n) return(NULL)
-  n_years <- as.numeric(diff(range(dates))) / 365.25
-  if (n_years <= 0) return(NULL)
-
-  lx   <- log(x)
-  pars <- lmomco::parpe3(lmomco::lmoms(lx))
-  if (is.null(pars$para) || anyNA(pars$para) || any(!is.finite(pars$para))) return(NULL)
-
-  list(
-    family    = "lp3",
-    mu_log    = pars$para["mu"],
-    sigma_log = pars$para["sigma"],
-    gamma     = pars$para["gamma"],
-    n         = length(x),
-    n_years   = n_years
-  )
-}
-
-## LP3 CDF: F(x) = P(X <= x), evaluated via Pearson III CDF on log scale.
-lp3_cdf <- function(x, fit) {
-  x  <- pmax(x, 1e-6)
-  lx <- log(x)
-  para <- lmomco::vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
-  sapply(lx, function(v) lmomco::cdfpe3(v, para))
-}
-
-## LP3 quantile: given AEP p, return discharge.
-## p = annual exceedance probability, so non-exceedance F = 1 - p.
-lp3_quantile <- function(p, fit) {
-  para  <- lmomco::vec2par(c(fit$mu_log, fit$sigma_log, fit$gamma), type = "pe3")
-  log_q <- lmomco::quape3(1 - p, para)
-  pmax(0, exp(log_q))
-}
-
-## AEP RI curve for a single LP3 fit: RI = 1 / AEP
-lp3_curve <- function(fit, label, color,
-                      ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  ep <- 1 / ri
-  q  <- pmax(0, sapply(ep, lp3_quantile, fit = fit))
-  data.frame(ri = ri, ep = ep, q = q, label = label, color = color,
-             stringsAsFactors = FALSE)
-}
-
-## LP3 mixture SF: S_mix(x) = 1 - prod_i F_i(x)  [Yu et al. Eq. 3]
-lp3_mixture_sf <- function(x, fits)
-  1 - Reduce("*", lapply(fits, function(f) lp3_cdf(x, f)))
-
-## Invert LP3 mixture SF to get RI curve by uniroot.
-lp3_mixture_curve <- function(fits, ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  min_target <- min(1 / ri)
-  ub <- max(sapply(fits, function(f) lp3_quantile(min_target, f)),
-            na.rm = TRUE) * 2
-  ub <- max(ub, 1)
-  for (i in seq_len(30)) {
-    if (isTRUE(lp3_mixture_sf(ub, fits) < min_target)) break
-    ub <- ub * 2
-  }
-  q <- sapply(ri, function(r) {
-    target <- 1 / r
-    lb     <- 1e-3   # LP3 defined for x > 0; GPD uses mu as lower bound
-    f_lb   <- lp3_mixture_sf(lb, fits) - target
-    f_ub   <- lp3_mixture_sf(ub, fits) - target
-    if (is.na(f_lb) || is.na(f_ub) || sign(f_lb) == sign(f_ub)) return(NA_real_)
-    tryCatch(
-      uniroot(function(x) lp3_mixture_sf(x, fits) - target,
-              lower = lb, upper = ub, tol = 0.1)$root,
-      error = function(e) NA_real_
-    )
-  })
-  data.frame(ri = ri, ep = 1 / ri, q = pmax(0, q),
-             label = "Mixture", color = "black",
-             stringsAsFactors = FALSE)
-}
-
-## ── Distribution-agnostic dispatch helpers ───────────────────────────────────
-##
-## These allow app.R to call a single function regardless of which
-## distribution family is active.
-
-## Fit one flood-type sample. family is "gpd" or "lp3".
-fit_dist <- function(x, dates, family, mu_threshold = NULL, min_n = 5) {
-  if (family == "gpd") fit_gpd(x, dates, mu_threshold, min_n)
-  else                 fit_lp3(x, dates, min_n)
-}
-
-## Theoretical RI curve for a single fit.
-dist_curve <- function(fit, label, color,
-                       ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  if (fit$family == "gpd") gpd_curve(fit, label, color, ri)
-  else                     lp3_curve(fit, label, color, ri)
-}
-
-## Mixture RI curve across a named list of fits (all same family).
-dist_mixture_curve <- function(fits, ri = c(seq(1.1, 10, 0.2), seq(11, 500, 1))) {
-  fam <- fits[[1]]$family
-  if (fam == "gpd") mixture_curve(fits, ri)
-  else              lp3_mixture_curve(fits, ri)
-}
-
-## ── Empirical RI (shared by both families) ───────────────────────────────────
-##
-## Weibull plotting position: RI_k = (n+1)/rank, rank=1 is largest.
-## Consistent with both PoT RI (GPD) and annual RI (LP3) at rate ≈ 1/yr.
-empirical_ri <- function(peaks) {
-  peaks %>%
-    filter(!is.na(peak_flow), peak_flow > 0) %>%
-    group_by(flood_type) %>%
-    arrange(desc(peak_flow)) %>%
-    mutate(
-      rank = seq_len(n()),
-      n    = n(),
-      ep   = rank / (n + 1),
-      ri   = (n + 1) / rank
-    ) %>%
-    ungroup()
+## For the m-th largest of the peaks above u over N qualifying years, the
+## partial-duration recurrence interval is T_pds = (N + 1) / m (Weibull).
+## It is converted to an annual return period with Langbein's relation,
+## T = 1 / (1 - exp(-1 / T_pds)), the same Poisson link used by F_i(x).
+empirical_annual_rp <- function(x, u, n_years) {
+  x <- sort(x[is.finite(x) & x > u], decreasing = TRUE)
+  m <- seq_along(x)
+  t_pds <- (n_years + 1) / m
+  data.frame(peak_flow = x, rank = m, ri = 1 / (1 - exp(-1 / t_pds)))
 }
 
 ## ── Flood-type remap (Script 7, report_figures.R, App) ──────────────────────
@@ -236,12 +117,11 @@ empirical_ri <- function(peaks) {
 ## Collapses the 3-class rain-fraction labels to 2 classes: snowmelt and
 ## rain_on_snow become snow_influenced. Works from flood_type_raw, the only
 ## label column after M1, and overwrites flood_type with the 2-class label.
-SNOW_INFLUENCED_TYPES <- c("rain_on_snow", "snowmelt")
-
 remap_2class <- function(peaks) {
+  snow_influenced_types <- c("rain_on_snow", "snowmelt")
   raw <- as.character(peaks$flood_type_raw)
   peaks$flood_type <- factor(
-    ifelse(raw %in% SNOW_INFLUENCED_TYPES, "snow_influenced",
+    ifelse(raw %in% snow_influenced_types, "snow_influenced",
            ifelse(raw == "rainfall", "rainfall", "unclassified")),
     levels = c("rainfall", "snow_influenced", "unclassified")
   )

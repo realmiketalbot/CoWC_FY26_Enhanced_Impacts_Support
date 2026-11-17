@@ -9,7 +9,15 @@
 > GAGES-II sites, and Script 2b selected **215 sites** (May–Sep ≥ 90% observed and ≥ 95% approved,
 > ≥ 20 qualifying water years in WY1986–2023). D-E is settled (§6).
 > **Phase U complete:** the 215-site HPC rerun (3 → 0 → 1 → 5 → 6a/6b → 8 → 9) passed the
-> site-aware invariant check (38 PASS, 0 FAIL, 4 INFO), and the data is committed. **Phase F in progress.** Script 7 and `report_figures.R` won't run against the
+> site-aware invariant check (38 PASS, 0 FAIL, 4 INFO), and the data is committed.
+> **Phase F core done (F1–F7):** the Poisson–GPD helpers in `functions.R` pass known-answer tests
+> (`_scripts/checks/test_pgpd_functions.R`). Script 7 fits all 215 sites locally in ~90 s. Mixture
+> fits: 200 sites (3-class), 205 (2-class), 136 (depth). **The headline changed:** the median
+> mixture/single ratio is ~1.0 at 2–10 yr (0.98, 1.00, 1.02) and rises to 1.10 at 100 yr and 1.30 at
+> 500 yr; mixture ≥ single at 27% of sites at 2 yr and 85% at 100 yr. The initial results had ratios of
+> 1.26–1.69 and ≥ 1 at ~97% of sites. The largest ratios come from heavy-tailed type fits
+> (ξ > 0.5 in ~17% of type fits, ~31 exceedances each).
+> **Next:** decide poster framing and panels (S1–S4), `report_figures.R` updates, then Phase A. Script 7 and `report_figures.R` won't run against the
 > new outputs until Phase F (they still read the removed top-*n* columns).
 
 ## 1. The stopping point
