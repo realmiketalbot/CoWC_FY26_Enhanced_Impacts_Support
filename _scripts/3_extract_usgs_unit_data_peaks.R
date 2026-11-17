@@ -65,6 +65,9 @@
 #       n_wy_complete         : water years with >= WY_COMPLETE_FRAC of days
 #                               observed (dispersion-index sample size M)
 #       complete_wys          : list-column of those water years
+#   - site_month_coverage.rds : one row per site x water year x month over
+#       each site's span: n_days observed, days_in_month, frac_obs
+#       (months with no data have n_days = 0)
 # ============================================================================
 
 library(tidyverse)
@@ -78,6 +81,7 @@ usgs_unit_base_dir    <- "/davenport-scratch/DATA/USGS/raw/Discharge/Unit"
 watershed_meta        <- "/davenport-scratch/DATA/GAGES-II/basinchar_and_report_sept_2011/spreadsheets-in-csv-format/conterm_basinid.txt"
 output_file           <- "_data/pot_peaks_all.rds"
 record_length_file    <- "_data/site_record_length.rds"
+month_coverage_file   <- "_data/site_month_coverage.rds"
 
 q_threshold <- 0.5   # quantile of daily max flow used as the candidate threshold
 
@@ -374,6 +378,31 @@ site_record_length <- wy_coverage %>%
 
 attr(site_record_length, "wy_complete_frac") <- WY_COMPLETE_FRAC
 
+# Month-level coverage, to see WHERE gaps fall (e.g., ice-affected winter
+# records vs. gaps in the flood season). One row per site x water year x
+# month over each site's full span, including months with no data
+# (n_days = 0). Used to settle decision D-E.
+site_month_coverage <- all_flows %>%
+  distinct(site_no, date) %>%
+  mutate(
+    month      = as.integer(lubridate::month(date)),
+    water_year = as.integer(lubridate::year(date)) + as.integer(month >= 10L)
+  ) %>%
+  count(site_no, water_year, month, name = "n_days") %>%
+  group_by(site_no) %>%
+  tidyr::complete(water_year = full_seq(water_year, 1), month = 1:12,
+                  fill = list(n_days = 0L)) %>%
+  ungroup() %>%
+  mutate(
+    water_year    = as.integer(water_year),
+    cal_year      = water_year - as.integer(month >= 10L),
+    days_in_month = lubridate::days_in_month(
+                      as.Date(sprintf("%d-%02d-01", cal_year, month))),
+    frac_obs      = n_days / days_in_month
+  ) %>%
+  select(site_no, water_year, month, cal_year, n_days, days_in_month, frac_obs) %>%
+  arrange(site_no, water_year, cal_year, month)
+
 message(sprintf(
   "Record length: median %.1f effective years (range %.1f-%.1f); median %d complete water years",
   median(site_record_length$eff_years), min(site_record_length$eff_years),
@@ -611,6 +640,10 @@ message(sprintf("\nSaved POT windows to %s", output_file))
 saveRDS(site_record_length, record_length_file)
 message(sprintf("Saved record length for %d sites to %s",
                 nrow(site_record_length), record_length_file))
+
+saveRDS(site_month_coverage, month_coverage_file)
+message(sprintf("Saved month-level coverage (%d rows) to %s",
+                nrow(site_month_coverage), month_coverage_file))
 
 site_summary <- pot_windows %>%
   group_by(site_no) %>%

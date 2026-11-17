@@ -4,11 +4,11 @@
 > **Parent plan:** `_planning/chapter1_methods_alignment_plan.md` (workstream IDs such as WS3.1 refer to it)
 > **Source:** `_documentation/Preliminary_Proposal.pdf`, Ch. 1 §1.2–1.3, App. A
 > **Deadline:** poster print in ~2 weeks (target ≈ 2026-12-01)
-> **Status (2026-11-17):** Phase 0 done (tags). Phase U code done on branch `agu2026-m1` (U1–U4).
-> A local dry run of the new 6a/6b on baseline inputs passed all 15 classification invariants.
-> **Next:** HPC rerun of Scripts 3 → 5 → 6a/6b → 8 → 9, then the full U4 check. Script 7 and
-> `report_figures.R` won't run against the new outputs until Phase F (they still read the removed
-> top-*n* columns).
+> **Status (2026-11-17):** Phase 0 done (tags). Phase U done: the HPC rerun of Scripts 3 → 9 passed
+> all 37 invariant checks, and the regenerated files are synced to the laptop (not yet committed).
+> **Blocking Phase F:** D-E is reopened (see §6). Script 3 now writes month-level coverage; rerun
+> Script 3 only and inspect where the gaps fall. Script 7 and `report_figures.R` won't run against
+> the new outputs until Phase F (they still read the removed top-*n* columns).
 
 ## 1. The stopping point
 
@@ -130,6 +130,7 @@ confirm that directly, so any difference can be traced without needing separate 
 | A5 | **Text**: change "Yu et al. (2022) framework" (~app.R:5, 329, 2748) to Poisson–GPD (Beguería 2005). Add a one-line "Preliminary: interim thresholds; EQD threshold selection and uncertainty bounds in progress" banner. Remove the LP3 description. The return-period labels already say "% annual chance", and M1 makes that statement true. | |
 | A6 | Copy the regenerated classified-peak, trend and FFA files into the App's `_data/`. | |
 | A7 | Optional: CWC logo on About (open TODO). | 10 min |
+| A8 | **Hide the Trends tab** in the AGU deployment behind a `SHOW_TRENDS <- FALSE` switch, and skip loading its data. Update the About text ("four tabs", the Trends description). Keep the Data-tab downloads for annual maxima. Reasons: the trends aren't part of Ch. 1, the incomplete first/last-year issue is still open, and the existing deployment keeps the tab for the technical report. | ~1 hr |
 
 Also update the `report_figures.R` lines ~900–908 the same way as A2. That's the only part of it that
 depends on the old top-*n* flags.
@@ -176,7 +177,19 @@ Upstream work happens before Script 7, with a full rerun.
 | D-B | `MIN_TYPE_COUNT` | **20** (unchanged) | 10–15 would admit more sites |
 | D-C | Poster's primary method | **Rain fraction (3-class)**, with 2-class alongside. Depth threshold as context only. | — |
 | D-D | Redeploy to the proposal's dashboard URL? | **Deploy M1 under a new app name**, keeping the old deployment as a frozen snapshot | Overwrite |
-| **D-E** *(settled 2026-11-17)* | Effective record length definition | **λ denominator = days with daily-max data / 365.25.** It needs no completeness cutoff and matches how λ is used. **Dispersion index M = water years ≥ 90% covered**, since DI needs whole-year counts. | Complete water years for both (simpler, but discards partial-year peaks from λ's denominator and not its numerator) |
+| **D-E** *(reopened 2026-11-17, see note below)* | Effective record length definition | **λ denominator = days with daily-max data / 365.25.** It needs no completeness cutoff and matches how λ is used. **Dispersion index M = water years ≥ 90% covered**, since DI needs whole-year counts. | Complete water years for both (simpler, but discards partial-year peaks from λ's denominator and not its numerator) |
+
+**D-E note (2026-11-17).** The HPC rerun showed gages are observed for only ~75% of each year
+(median 27.7 effective years over a ~37-year span; median 13 water years ≥ 90% observed, min 0).
+If the gaps are seasonal (e.g., ice-affected winter records), the days-based denominator inflates
+λ by about a third, and the 90%-of-days rule leaves too few years for the dispersion index. Script 3
+now also writes `site_month_coverage.rds` (site × water year × month). Once it's rerun, inspect where
+the gaps fall. The likely replacement: a water year counts as observed when its flood season is
+≥ 90% observed, used for both λ and the dispersion index.
+
+**Site-count preference (user, 2026-11-17):** a smaller final set of watersheds is acceptable if it
+improves analysis quality. Record-quality screens (e.g., a minimum number of observed flood-season
+years) can be strict.
 
 ## 7. Schedule
 
