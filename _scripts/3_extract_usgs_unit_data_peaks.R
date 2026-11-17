@@ -3,23 +3,29 @@
 # ============================================================================
 # extract_usgs_unit_data_peaks.R
 #
-# Find all independent POT peaks for selected unit-data stations.
+# Find all independent candidate peaks for selected unit-data stations.
 # Implements independence criteria from USWRC (1976), as reviewed in
 # Lang et al. (1999).
-# All independent peaks are retained for later flood type classification
-# and per-type GPD fitting (following Yu et al. 2022).
+# All independent peaks are retained for later flood type classification.
 #
-# The per-site PoT threshold (q_threshold quantile of daily max flow over the
-# full record) is saved as `pot_threshold_cfs` in the output. This value is
-# used as the fixed GPD location parameter mu in downstream fitting,
-# following Yu et al. 2022.
+# The per-site candidate threshold (q_threshold quantile of daily max flow
+# over the full record) is saved as `candidate_threshold_cfs`. It filters
+# local maxima into candidate peaks and does nothing else. It is NOT the
+# GPD/Poisson-GPD model-fitting threshold: that threshold (u_i) is chosen
+# per flood type downstream in Script 7. (Renamed from `pot_threshold_cfs`,
+# which the initial results also used as the GPD location; see
+# _planning/agu2026_interim_plan.md.)
+#
+# The effective record length per site is also computed from the daily
+# series and saved to _data/site_record_length.rds, as the denominator of
+# the Poisson exceedance rate (lambda) and for the dispersion index.
 #
 # CHANGE FROM PREVIOUS VERSION -----------------------------------------------
 # Peak identification is now a three-stage process:
 #
 #   1. Local maxima are detected across the full daily series using
 #      pracma::findpeaks, with NO threshold applied.
-#   2. Local maxima are filtered to those exceeding the per-site PoT
+#   2. Local maxima are filtered to those exceeding the per-site candidate
 #      threshold.
 #   3. The USWRC independence criteria are applied by find_independent_peaks().
 #
@@ -46,11 +52,19 @@
 #   - /path/to/usgs/unit/<site_no>/<year>.rds : unit discharge files
 #   - conterm_basinid.txt          : GAGES-II metadata (drainage area)
 #
-# OUTPUT:
+# OUTPUTS:
 #   - pot_peaks_all.rds : one row per site-day inside each peak window,
 #                         with columns:
 #                           site_no, date, peak_id, peak_date, peak_flow,
-#                           pot_threshold_cfs
+#                           candidate_threshold_cfs, search_radius,
+#                           antecedent_runoff_mm, antecedent_days_used
+#   - site_record_length.rds : one row per site, with columns:
+#       site_no, n_days_obs   : days with a daily-max value
+#       eff_years             : n_days_obs / 365.25 (lambda denominator)
+#       wy_first, wy_last     : first and last water year with any data
+#       n_wy_complete         : water years with >= WY_COMPLETE_FRAC of days
+#                               observed (dispersion-index sample size M)
+#       complete_wys          : list-column of those water years
 # ============================================================================
 
 library(tidyverse)
@@ -63,8 +77,13 @@ selected_stations_csv <- "_data/selected_unit_stations.csv"
 usgs_unit_base_dir    <- "/davenport-scratch/DATA/USGS/raw/Discharge/Unit"
 watershed_meta        <- "/davenport-scratch/DATA/GAGES-II/basinchar_and_report_sept_2011/spreadsheets-in-csv-format/conterm_basinid.txt"
 output_file           <- "_data/pot_peaks_all.rds"
+record_length_file    <- "_data/site_record_length.rds"
 
-q_threshold <- 0.5   # quantile of daily max flow used as PoT threshold / GPD mu
+q_threshold <- 0.5   # quantile of daily max flow used as the candidate threshold
+
+# A water year counts as complete for the dispersion index when at least
+# this fraction of its days has a daily-max value (decision D-E).
+WY_COMPLETE_FRAC <- 0.90
 
 # findpeaks shape parameters. nups/ndowns = 1 is the minimal definition of a
 # local maximum (one rise before, one fall after). Raising them requires a
@@ -215,8 +234,6 @@ find_local_maxima <- function(flow_df, n_ups = NUPS, n_downs = NDOWNS) {
     # perturbation far below the data's precision resolves each plateau to
     # its first day without altering any real ordering.
 
-    lo     <- min(seg$q_daily_max, na.rm = TRUE)
-
     eps <- 1e-6 * max(seg$q_daily_max, na.rm = TRUE)
     q_jit <- seg$q_daily_max - eps * seq_len(nrow(seg))
 
@@ -320,25 +337,68 @@ all_flows <- all_flows %>%
                     (drain_sqkm * 1e6) * 1000)
 
 # ============================================================================
-# COMPUTE PER-SITE POT THRESHOLD
+# EFFECTIVE RECORD LENGTH PER SITE (decision D-E)
 #
-# The q_threshold quantile of daily max flow over the full record becomes:
-#   (a) the minimum flow a local maximum must exceed to become a candidate,
-#       and
-#   (b) the GPD location parameter mu in downstream fitting (Yu et al. 2022).
+# all_flows holds one row per site-day that has a daily-max value, so a row
+# count is the number of observed days.
+#   eff_years     : observed days / 365.25. Denominator of the Poisson
+#                   exceedance rate. Peaks can only be detected on observed
+#                   days, so numerator and denominator cover the same period.
+#   n_wy_complete : water years (Oct 1 - Sep 30) with >= WY_COMPLETE_FRAC of
+#                   their days observed. Used as M in the dispersion index,
+#                   where partially observed years would understate annual
+#                   counts and inflate the variance.
+# ============================================================================
+wy_coverage <- all_flows %>%
+  distinct(site_no, date) %>%
+  mutate(water_year = as.integer(lubridate::year(date)) +
+           as.integer(lubridate::month(date) >= 10L)) %>%
+  count(site_no, water_year, name = "n_days") %>%
+  mutate(
+    wy_days  = as.integer(as.Date(sprintf("%d-10-01", water_year)) -
+                          as.Date(sprintf("%d-10-01", water_year - 1L))),
+    frac_obs = n_days / wy_days
+  )
+
+site_record_length <- wy_coverage %>%
+  group_by(site_no) %>%
+  summarize(
+    n_days_obs    = sum(n_days),
+    eff_years     = n_days_obs / 365.25,
+    wy_first      = min(water_year),
+    wy_last       = max(water_year),
+    n_wy_complete = sum(frac_obs >= WY_COMPLETE_FRAC),
+    complete_wys  = list(sort(water_year[frac_obs >= WY_COMPLETE_FRAC])),
+    .groups       = "drop"
+  )
+
+attr(site_record_length, "wy_complete_frac") <- WY_COMPLETE_FRAC
+
+message(sprintf(
+  "Record length: median %.1f effective years (range %.1f-%.1f); median %d complete water years",
+  median(site_record_length$eff_years), min(site_record_length$eff_years),
+  max(site_record_length$eff_years), as.integer(median(site_record_length$n_wy_complete))
+))
+
+# ============================================================================
+# COMPUTE PER-SITE CANDIDATE THRESHOLD
 #
-# Saved separately so it can be joined into the output and used by app.R
-# without needing access to the raw daily flow record.
+# The q_threshold quantile of daily max flow over the full record is the
+# minimum flow a local maximum must exceed to become a candidate peak. It is
+# not a model-fitting threshold (see header).
+#
+# Saved separately so it can be joined into the output without needing
+# access to the raw daily flow record downstream.
 # ============================================================================
 site_thresholds <- all_flows %>%
   group_by(site_no) %>%
   summarize(
-    pot_threshold_cfs = quantile(q_daily_max, q_threshold, na.rm = TRUE),
+    candidate_threshold_cfs = unname(quantile(q_daily_max, q_threshold, na.rm = TRUE)),
     .groups = "drop"
   )
 
 message(sprintf(
-  "Computed PoT thresholds for %d sites (q=%.2f of daily max flow)",
+  "Computed candidate thresholds for %d sites (q=%.2f of daily max flow)",
   nrow(site_thresholds), q_threshold
 ))
 
@@ -352,6 +412,28 @@ search_window <- basin_meta %>%
     site_no,
     search_radius = as.integer(pmax(1L, ceiling(5 + log(0.3861 * drain_sqkm))))
   )
+
+# Declustering boundary check (Eq. 1.1 uses theta > ...; is_dependent() treats
+# a gap < theta as dependent, so a gap exactly equal to theta counts as
+# independent). Gaps are whole days, so the two only disagree if theta is a
+# whole number at some site.
+theta_check <- basin_meta %>%
+  filter(site_no %in% unique(all_flows$site_no)) %>%
+  mutate(theta = 5 + log(0.3861 * drain_sqkm),
+         dist_to_integer = abs(theta - round(theta)))
+
+if (any(theta_check$dist_to_integer < 1e-9)) {
+  warning(sprintf(
+    "theta is a whole number at %d site(s); the '>' vs '>=' boundary in Eq. 1.1 can bind there: %s",
+    sum(theta_check$dist_to_integer < 1e-9),
+    paste(theta_check$site_no[theta_check$dist_to_integer < 1e-9], collapse = ", ")
+  ))
+} else {
+  message(sprintf(
+    "Declustering boundary check: theta is non-integer at all %d sites (closest: %.2e days); '>' vs '>=' cannot bind",
+    nrow(theta_check), min(theta_check$dist_to_integer)
+  ))
+}
 
 # ============================================================================
 # STAGE 1: DETECT LOCAL MAXIMA (no threshold applied)
@@ -369,16 +451,16 @@ message(sprintf("  %d local maxima across %d sites (%.1f%% of all site-days)",
                 100 * nrow(local_maxima) / nrow(all_flows)))
 
 # ============================================================================
-# STAGE 2: FILTER TO LOCAL MAXIMA ABOVE THE PoT THRESHOLD
+# STAGE 2: FILTER TO LOCAL MAXIMA ABOVE THE CANDIDATE THRESHOLD
 # ============================================================================
 candidate_peaks <- local_maxima %>%
   left_join(site_thresholds, by = "site_no") %>%
-  filter(q_daily_max > pot_threshold_cfs) %>%
-  select(-pot_threshold_cfs) %>%
+  filter(q_daily_max > candidate_threshold_cfs) %>%
+  select(-candidate_threshold_cfs) %>%
   arrange(site_no, date)
 
 message(sprintf(
-  "Stage 2: %d local maxima exceed the per-site PoT threshold (%.1f%% retained)",
+  "Stage 2: %d local maxima exceed the per-site candidate threshold (%.1f%% retained)",
   nrow(candidate_peaks),
   100 * nrow(candidate_peaks) / nrow(local_maxima)
 ))
@@ -495,7 +577,7 @@ peak_info <- independent_peaks %>%
   arrange(peak_date, .by_group = TRUE) %>%
   mutate(peak_id = as.factor(as.character(row_number()))) %>%
   ungroup() %>%
-  left_join(site_thresholds, by = "site_no")   # attach mu for downstream use
+  left_join(site_thresholds, by = "site_no")   # attach candidate threshold
 
 # ============================================================================
 # TRUNCATE WINDOWS TO EVENT DURATION (75% of peak flow threshold)
@@ -517,24 +599,28 @@ pot_windows <- flows_in_windows %>%
       (event_block == event_block[date == peak_date] & is_event)
   ) %>%
   ungroup() %>%
-  select(site_no, date, peak_id, peak_date, peak_flow, pot_threshold_cfs,
+  select(site_no, date, peak_id, peak_date, peak_flow, candidate_threshold_cfs,
          search_radius, antecedent_runoff_mm, antecedent_days_used)
 
 # ============================================================================
-# SAVE OUTPUT AND SUMMARIZE
+# SAVE OUTPUTS AND SUMMARIZE
 # ============================================================================
 saveRDS(pot_windows, output_file)
 message(sprintf("\nSaved POT windows to %s", output_file))
 
+saveRDS(site_record_length, record_length_file)
+message(sprintf("Saved record length for %d sites to %s",
+                nrow(site_record_length), record_length_file))
+
 site_summary <- pot_windows %>%
   group_by(site_no) %>%
   summarize(
-    n_peaks           = n_distinct(peak_id),
-    n_years           = n_distinct(lubridate::year(peak_date)),
-    peaks_per_year    = n_peaks / n_years,
-    pot_threshold_cfs = first(pot_threshold_cfs),
-    .groups           = "drop"
+    n_peaks                 = n_distinct(peak_id),
+    candidate_threshold_cfs = first(candidate_threshold_cfs),
+    .groups                 = "drop"
   ) %>%
+  left_join(site_record_length %>% select(site_no, eff_years), by = "site_no") %>%
+  mutate(peaks_per_year = n_peaks / eff_years) %>%
   arrange(n_peaks)
 
 print(site_summary, n = Inf)
@@ -544,87 +630,3 @@ cat("\nPeaks per year (mu): median",
     round(median(site_summary$peaks_per_year), 2),
     "| min", round(min(site_summary$peaks_per_year), 2),
     "| max", round(max(site_summary$peaks_per_year), 2), "\n")
-
-# ============================================================================
-# COMPARE AGAINST PREVIOUS METHODOLOGY
-# ============================================================================
-pot_windows_old <- readRDS("_data/_archive/pot_peaks_all_extraction_threshold_version.rds")
-
-# ============================================================================
-# Compare new (findpeaks) vs. old (run-segmentation) peak extraction
-# Requires: pot_windows, pot_windows_old
-# ============================================================================
-
-peaks_new <- pot_windows     %>% distinct(site_no, peak_date, peak_flow)
-peaks_old <- pot_windows_old %>% distinct(site_no, peak_date, peak_flow)
-
-# --- Counts ----------------------------------------------------------------
-
-counts <- full_join(
-  peaks_new %>% count(site_no, name = "n_new"),
-  peaks_old %>% count(site_no, name = "n_old"),
-  by = "site_no"
-) %>%
-  mutate(across(c(n_new, n_old), ~ replace_na(.x, 0L)),
-         ratio = n_new / n_old) %>%
-  arrange(desc(ratio))
-
-cat("Total peaks  new:", nrow(peaks_new), " old:", nrow(peaks_old),
-    " ratio:", round(nrow(peaks_new) / nrow(peaks_old), 2), "\n")
-cat("Per-site ratio   median:", round(median(counts$ratio, na.rm = TRUE), 2),
-    " min:", round(min(counts$ratio, na.rm = TRUE), 2),
-    " max:", round(max(counts$ratio, na.rm = TRUE), 2), "\n")
-cat("Sites with fewer peaks than before:", sum(counts$ratio < 1), "\n\n")
-
-# --- Overlap: which old peaks survived, which new ones are recovered --------
-
-overlap <- full_join(
-  peaks_new %>% mutate(in_new = TRUE),
-  peaks_old %>% mutate(in_old = TRUE),
-  by = c("site_no", "peak_date")
-) %>%
-  mutate(across(c(in_new, in_old), ~ replace_na(.x, FALSE)))
-
-cat("Old peaks retained in new:", sum(overlap$in_new & overlap$in_old),
-    "of", nrow(peaks_old),
-    sprintf("(%.1f%%)", 100 * sum(overlap$in_new & overlap$in_old) / nrow(peaks_old)), "\n")
-cat("Old peaks now dropped    :", sum(!overlap$in_new & overlap$in_old), "\n")
-cat("New peaks recovered      :", sum(overlap$in_new & !overlap$in_old), "\n\n")
-
-# --- Are recovered peaks large enough to matter for the tail? --------------
-# If the recovered peaks are all small, the extraction change thins the bulk
-# without affecting upper-tail quantiles.
-
-recovered <- overlap %>%
-  filter(in_new, !in_old) %>%
-  select(site_no, peak_date, peak_flow = peak_flow.x)
-
-rank_within_site <- peaks_new %>%
-  group_by(site_no) %>%
-  mutate(pct_rank = percent_rank(peak_flow)) %>%
-  ungroup() %>%
-  inner_join(recovered %>% select(site_no, peak_date), by = c("site_no", "peak_date"))
-
-cat("Recovered peaks, percentile rank within the new site sample:\n")
-print(summary(rank_within_site$pct_rank))
-cat("Recovered peaks in the top 10% at their site:",
-    sum(rank_within_site$pct_rank > 0.9), "\n\n")
-
-# --- Sanity check: the largest peak at each site should not change ----------
-
-max_check <- full_join(
-  peaks_new %>% group_by(site_no) %>% slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
-    ungroup() %>% select(site_no, max_new = peak_flow, date_new = peak_date),
-  peaks_old %>% group_by(site_no) %>% slice_max(peak_flow, n = 1, with_ties = FALSE) %>%
-    ungroup() %>% select(site_no, max_old = peak_flow, date_old = peak_date),
-  by = "site_no"
-) %>%
-  mutate(differs = max_new != max_old | date_new != date_old)
-
-cat("Sites where the largest peak changed:", sum(max_check$differs, na.rm = TRUE),
-    "of", nrow(max_check), "\n")
-if (any(max_check$differs, na.rm = TRUE)) print(filter(max_check, differs), n = 20)
-
-# --- Per-site table --------------------------------------------------------
-
-print(counts, n = 20)

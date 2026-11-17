@@ -172,7 +172,7 @@ Upstream work happens before Script 7, with a full rerun.
 | D-B | `MIN_TYPE_COUNT` | **20** (unchanged) | 10–15 would admit more sites |
 | D-C | Poster's primary method | **Rain fraction (3-class)**, with 2-class alongside. Depth threshold as context only. | — |
 | D-D | Redeploy to the proposal's dashboard URL? | **Deploy M1 under a new app name**, keeping the old deployment as a frozen snapshot | Overwrite |
-| **D-E** *(open)* | Effective record length definition | **λ denominator = days with daily-max data / 365.25.** It needs no completeness cutoff and matches how λ is used. **Dispersion index M = water years ≥ 90% covered**, since DI needs whole-year counts. | Complete water years for both (simpler, but discards partial-year peaks from λ's denominator and not its numerator) |
+| **D-E** *(settled 2026-11-17)* | Effective record length definition | **λ denominator = days with daily-max data / 365.25.** It needs no completeness cutoff and matches how λ is used. **Dispersion index M = water years ≥ 90% covered**, since DI needs whole-year counts. | Complete water years for both (simpler, but discards partial-year peaks from λ's denominator and not its numerator) |
 
 ## 7. Schedule
 
