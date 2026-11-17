@@ -4,11 +4,13 @@
 > **Parent plan:** `_planning/chapter1_methods_alignment_plan.md` (workstream IDs such as WS3.1 refer to it)
 > **Source:** `_documentation/Preliminary_Proposal.pdf`, Ch. 1 §1.2–1.3, App. A
 > **Deadline:** poster print in ~2 weeks (target ≈ 2026-12-01)
-> **Status (2026-11-17):** Phase 0 done (tags). Phase U done: the HPC rerun of Scripts 3 → 9 passed
-> all 37 invariant checks, and the regenerated files are synced to the laptop (not yet committed).
-> **Blocking Phase F:** station re-screen and D-E (see §6). Next: run the rewritten Script 2 on the
-> HPC, inspect where coverage gaps fall, then write Script 2b's selection rule. Script 7 and `report_figures.R` won't run against
-> the new outputs until Phase F (they still read the removed top-*n* columns).
+> **Status (2026-11-17):** Phase 0 done (tags). Phase U code passed all 37 invariant checks on the
+> original 206 sites. The station re-screen is done: Script 2 measured true coverage for 316 Colorado
+> GAGES-II sites, and Script 2b selected **215 sites** (May–Sep ≥ 90% observed and ≥ 95% approved,
+> ≥ 20 qualifying water years in WY1986–2023). D-E is settled (§6).
+> **Next:** on the HPC, rerun 3 → 0 → 1 → 5 → 6a/6b → 8 → 9 for the new site list, then the
+> site-aware invariant check. Phase F follows. Script 7 and `report_figures.R` won't run against the
+> new outputs until Phase F (they still read the removed top-*n* columns).
 
 ## 1. The stopping point
 
@@ -177,15 +179,15 @@ Upstream work happens before Script 7, with a full rerun.
 | D-B | `MIN_TYPE_COUNT` | **20** (unchanged) | 10–15 would admit more sites |
 | D-C | Poster's primary method | **Rain fraction (3-class)**, with 2-class alongside. Depth threshold as context only. | — |
 | D-D | Redeploy to the proposal's dashboard URL? | **Deploy M1 under a new app name**, keeping the old deployment as a frozen snapshot | Overwrite |
-| **D-E** *(reopened 2026-11-17, see note below)* | Effective record length definition | **λ denominator = days with daily-max data / 365.25.** It needs no completeness cutoff and matches how λ is used. **Dispersion index M = water years ≥ 90% covered**, since DI needs whole-year counts. | Complete water years for both (simpler, but discards partial-year peaks from λ's denominator and not its numerator) |
+| **D-E** *(settled 2026-11-17, revised)* | Effective record length definition | **Qualifying water years** from Script 2b (`site_qualifying_years.rds`): May–Sep ≥ 90% observed and ≥ 95% of flood-season values approved. **λ = type exceedances in qualifying years ÷ number of qualifying years.** Peaks in non-qualifying years are excluded from fitting. **Dispersion index M = number of qualifying years.** | Days/365.25 (the first version; rejected because winter gaps would inflate λ by about a third) |
 
-**D-E note (2026-11-17).** The HPC rerun showed gages are observed for only ~75% of each year
-(median 27.7 effective years over a ~37-year span; median 13 water years ≥ 90% observed, min 0).
-If the gaps are seasonal (e.g., ice-affected winter records), the days-based denominator inflates
-λ by about a third, and the 90%-of-days rule leaves too few years for the dispersion index. Script 3
-now also writes `site_month_coverage.rds` (site × water year × month). Once it's rerun, inspect where
-the gaps fall. The likely replacement: a water year counts as observed when its flood season is
-≥ 90% observed, used for both λ and the dispersion index.
+**D-E history (2026-11-17).** The first rerun showed gages are observed for only ~75% of each year.
+Script 2's month-level coverage showed the gaps are seasonal: network-mean coverage is ~90% May–Sep
+but ~50% Dec–Jan. Where winter was observed, 97% of annual maxima fell in Apr–Oct, and winter annual
+maxima were typically half the site median. May–Sep rather than Apr–Oct as the required season keeps
+16 high-elevation summer-only gages, whose observed Aprils and Octobers held only 2.4% and 0.4% of
+their large peaks. The λ undercount from unobserved April/October floods is estimated at < ~1%.
+State this as an assumption in the methods text, with these numbers.
 
 **Station re-screen (decided 2026-11-17).** The old Script 2 "completeness" was an approval
 share, (obs flagged "A") / (obs present), on calendar years. It never counted missing data, so the
@@ -195,12 +197,20 @@ share, (obs flagged "A") / (obs present), on calendar years. It never counted mi
 - **Keep regulated sites** (143 of the current 206). No regulated/unregulated distinction has
   shown up in the results so far. Regulation stays a stratifying variable.
 
-Pipeline: Script 2 (HPC) writes `_data/usgs_unit_coverage_co.rds` (site × water year × month).
-Script 2b (local) applies the selection rule and writes `selected_unit_stations.csv`. The rule is
-set after inspecting where gaps fall. The same flood-season definition then gives λ's denominator
-and the dispersion index's M, which settles D-E. Then rerun 3 → 0 → 1 → 5 → 6a/6b → 8 → 9. Script 4
-already extracts WLDAS for every Colorado GAGES-II basin, so added sites need no new extraction. The
-invariant check needs a site-aware update, since the site list changes.
+- **Rule (Script 2b):** May–Sep ≥ 90% observed and ≥ 95% approved; ≥ 20 qualifying water years in
+  WY1986–2023 (gaps between years allowed). **215 sites**: 201 of the old 206 plus 14 new.
+  Robustness: 189 sites at ≥ 25 years, 142 at ≥ 30.
+- The approval condition removes 4 mostly provisional WY2022–2023 site-years and no sites.
+- The old "complete 2022" recency requirement is dropped. It doesn't matter for FFA, and Trends is
+  hidden for AGU.
+
+Pipeline: Script 2 (HPC) writes `_data/usgs_unit_coverage_co.rds`. Script 2b (local) writes
+`selected_unit_stations.csv` and `site_qualifying_years.rds`. Then rerun 3 → 0 → 1 → 5 → 6a/6b →
+8 → 9. Script 4 already extracts WLDAS for every Colorado GAGES-II basin, so added sites need no new
+extraction. The invariant check is site-aware: it compares the 201 common sites. The 3-class split
+(α_s) is a network median and moves with the site set, so 3-class label swaps between the old and new
+split are allowed and verified. A local simulation on the 201 common sites moved the split from
+0.3120 to 0.3100 and swapped 24 of 59,871 labels.
 
 **Site-count preference (user, 2026-11-17):** a smaller final set of watersheds is acceptable if it
 improves analysis quality. Record-quality screens (e.g., a minimum number of observed flood-season

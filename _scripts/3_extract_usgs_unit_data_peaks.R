@@ -16,9 +16,10 @@
 # which the initial results also used as the GPD location; see
 # _planning/agu2026_interim_plan.md.)
 #
-# The effective record length per site is also computed from the daily
-# series and saved to _data/site_record_length.rds, as the denominator of
-# the Poisson exceedance rate (lambda) and for the dispersion index.
+# Record length (the qualifying water years used for lambda and the
+# dispersion index) is defined by Script 2b from flood-season coverage, in
+# _data/site_qualifying_years.rds. Script 3 extracts peaks over each site's
+# full record; Script 7 restricts fitting to qualifying years.
 #
 # CHANGE FROM PREVIOUS VERSION -----------------------------------------------
 # Peak identification is now a three-stage process:
@@ -58,13 +59,6 @@
 #                           site_no, date, peak_id, peak_date, peak_flow,
 #                           candidate_threshold_cfs, search_radius,
 #                           antecedent_runoff_mm, antecedent_days_used
-#   - site_record_length.rds : one row per site, with columns:
-#       site_no, n_days_obs   : days with a daily-max value
-#       eff_years             : n_days_obs / 365.25 (lambda denominator)
-#       wy_first, wy_last     : first and last water year with any data
-#       n_wy_complete         : water years with >= WY_COMPLETE_FRAC of days
-#                               observed (dispersion-index sample size M)
-#       complete_wys          : list-column of those water years
 # ============================================================================
 
 library(tidyverse)
@@ -77,13 +71,8 @@ selected_stations_csv <- "_data/selected_unit_stations.csv"
 usgs_unit_base_dir    <- "/davenport-scratch/DATA/USGS/raw/Discharge/Unit"
 watershed_meta        <- "/davenport-scratch/DATA/GAGES-II/basinchar_and_report_sept_2011/spreadsheets-in-csv-format/conterm_basinid.txt"
 output_file           <- "_data/pot_peaks_all.rds"
-record_length_file    <- "_data/site_record_length.rds"
 
 q_threshold <- 0.5   # quantile of daily max flow used as the candidate threshold
-
-# A water year counts as complete for the dispersion index when at least
-# this fraction of its days has a daily-max value (decision D-E).
-WY_COMPLETE_FRAC <- 0.90
 
 # findpeaks shape parameters. nups/ndowns = 1 is the minimal definition of a
 # local maximum (one rise before, one fall after). Raising them requires a
@@ -337,50 +326,6 @@ all_flows <- all_flows %>%
                     (drain_sqkm * 1e6) * 1000)
 
 # ============================================================================
-# EFFECTIVE RECORD LENGTH PER SITE (decision D-E)
-#
-# all_flows holds one row per site-day that has a daily-max value, so a row
-# count is the number of observed days.
-#   eff_years     : observed days / 365.25. Denominator of the Poisson
-#                   exceedance rate. Peaks can only be detected on observed
-#                   days, so numerator and denominator cover the same period.
-#   n_wy_complete : water years (Oct 1 - Sep 30) with >= WY_COMPLETE_FRAC of
-#                   their days observed. Used as M in the dispersion index,
-#                   where partially observed years would understate annual
-#                   counts and inflate the variance.
-# ============================================================================
-wy_coverage <- all_flows %>%
-  distinct(site_no, date) %>%
-  mutate(water_year = as.integer(lubridate::year(date)) +
-           as.integer(lubridate::month(date) >= 10L)) %>%
-  count(site_no, water_year, name = "n_days") %>%
-  mutate(
-    wy_days  = as.integer(as.Date(sprintf("%d-10-01", water_year)) -
-                          as.Date(sprintf("%d-10-01", water_year - 1L))),
-    frac_obs = n_days / wy_days
-  )
-
-site_record_length <- wy_coverage %>%
-  group_by(site_no) %>%
-  summarize(
-    n_days_obs    = sum(n_days),
-    eff_years     = n_days_obs / 365.25,
-    wy_first      = min(water_year),
-    wy_last       = max(water_year),
-    n_wy_complete = sum(frac_obs >= WY_COMPLETE_FRAC),
-    complete_wys  = list(sort(water_year[frac_obs >= WY_COMPLETE_FRAC])),
-    .groups       = "drop"
-  )
-
-attr(site_record_length, "wy_complete_frac") <- WY_COMPLETE_FRAC
-
-message(sprintf(
-  "Record length: median %.1f effective years (range %.1f-%.1f); median %d complete water years",
-  median(site_record_length$eff_years), min(site_record_length$eff_years),
-  max(site_record_length$eff_years), as.integer(median(site_record_length$n_wy_complete))
-))
-
-# ============================================================================
 # COMPUTE PER-SITE CANDIDATE THRESHOLD
 #
 # The q_threshold quantile of daily max flow over the full record is the
@@ -608,10 +553,6 @@ pot_windows <- flows_in_windows %>%
 saveRDS(pot_windows, output_file)
 message(sprintf("\nSaved POT windows to %s", output_file))
 
-saveRDS(site_record_length, record_length_file)
-message(sprintf("Saved record length for %d sites to %s",
-                nrow(site_record_length), record_length_file))
-
 site_summary <- pot_windows %>%
   group_by(site_no) %>%
   summarize(
@@ -619,8 +560,11 @@ site_summary <- pot_windows %>%
     candidate_threshold_cfs = first(candidate_threshold_cfs),
     .groups                 = "drop"
   ) %>%
-  left_join(site_record_length %>% select(site_no, eff_years), by = "site_no") %>%
-  mutate(peaks_per_year = n_peaks / eff_years) %>%
+  left_join(
+    all_flows %>% distinct(site_no, date) %>% count(site_no, name = "n_days_obs"),
+    by = "site_no"
+  ) %>%
+  mutate(peaks_per_year = n_peaks / (n_days_obs / 365.25)) %>%
   arrange(n_peaks)
 
 print(site_summary, n = Inf)
