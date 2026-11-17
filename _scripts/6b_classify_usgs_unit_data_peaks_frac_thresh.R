@@ -31,16 +31,31 @@
 # reproducibility.
 #
 # This script produces the 3-class output only. The 2-class output
-# (frac_thresh_2class: rainfall vs. snow_influenced) is derived in Script 7 as
-# a downstream remap.
+# (frac_thresh_2class: rainfall vs. snow_influenced) is derived downstream
+# with remap_2class() in functions.R.
+#
+# This script only LABELS peaks. It does no sample selection: the Yu et al.
+# (2022) top-n selection and the MIN_TYPE_SAMPLE demotion were removed for
+# milestone M1 (see _planning/agu2026_interim_plan.md, item U2). Magnitude
+# filtering happens in Script 7, through each flood type's fitting threshold.
+#
+# fit_eligible = data_sufficient & !is.na(rain_frac) & flux_sufficient.
+# It defines the single-sample pool in Script 7, so that pool excludes the
+# same peaks the per-type pools exclude (the rule the old single-sample
+# selection used).
+#
+# Thresholds live in CLASS_CONFIG and are written to the output as the
+# "class_config" attribute. Defaults reproduce the initial results.
 #
 # INPUTS:
 #   - _data/accum_curves_60d.rds  : daily rain/melt per peak (Script 5)
-#   - _data/pot_peaks_all.rds     : POT peaks with search_radius per peak
+#   - _data/pot_peaks_all.rds     : candidate peaks with search_radius (Script 3)
 #   - _data/site_metadata.rds     : regulated flag, basin attributes
 #
 # OUTPUT:
 #   - _data/pot_peaks_classified_frac_thresh_3class.rds
+#     flood_type is an exact factor copy of flood_type_raw, kept for one
+#     release so existing consumers keep working. To be removed in M2.
 #
 # Author : Mike Talbot, PhD Student, Colorado State University
 # Date   : 2026-05-21
@@ -58,25 +73,31 @@ peaks_file  <- "_data/pot_peaks_all.rds"
 meta_file   <- "_data/site_metadata.rds"
 output_file <- "_data/pot_peaks_classified_frac_thresh_3class.rds"
 
-# Rainfall threshold: peaks with rain_frac >= this value are classified as
-# rainfall. The 0.99 tolerance absorbs floating-point artifacts in the
-# rain_frac ratio itself.
-RAIN_FRAC_THRESH <- 0.99
+CLASS_CONFIG <- list(
+  # alpha_r. Peaks with rain_frac >= this value are classified as rainfall.
+  # The 0.99 tolerance absorbs floating-point artifacts in the rain_frac
+  # ratio itself.
+  rain_frac_thresh = 0.99,
 
-# Noise floor: a peak-level eligibility threshold on total antecedent-window
-# flux (total_flux = summed rain + melt over the window). Peaks whose total
-# flux falls below this value are excluded from analysis entirely (both
-# type-conditioned classification and the single-sample pool) as suspected
-# model/observation mismatches, not merely zeroed out day-by-day.
-NOISE_FLOOR_MM <- 0.1    # mm, applied to total_flux
+  # alpha_s. NULL = population median of rain_frac among mixed events
+  # (the proposal's rule). A number fixes the split instead, for
+  # sensitivity runs.
+  mixed_split      = NULL,
 
-# Completeness: minimum fraction of search_radius days that must have WLDAS
-# data for a peak to be classified (rather than marked unclassified).
-MIN_DAYS_SHORT <- 0.90
+  # Noise floor: a peak-level eligibility threshold on total antecedent-
+  # window flux (total_flux = summed rain + melt over the window). Peaks
+  # whose total flux falls below this value are excluded from analysis
+  # entirely as suspected model/observation mismatches.
+  noise_floor_mm   = 0.1,
 
-# Yu et al. (2022) top-n sample size thresholds
-MIN_SINGLE_SAMPLE <- 25   # minimum peaks for single-sample GPD/LP3 fit
-MIN_TYPE_SAMPLE   <- 20   # minimum peaks per type for per-type GPD/LP3 fit
+  # Completeness: minimum fraction of search_radius days that must have
+  # WLDAS data for a peak to be classified.
+  min_days_frac    = 0.90
+)
+
+RAIN_FRAC_THRESH <- CLASS_CONFIG$rain_frac_thresh
+NOISE_FLOOR_MM   <- CLASS_CONFIG$noise_floor_mm
+MIN_DAYS_SHORT   <- CLASS_CONFIG$min_days_frac
 
 # ============================================================================
 # LOAD DATA
@@ -92,7 +113,7 @@ meta  <- readRDS(meta_file)
 # ASSUMPTION: peak_id uniquely identifies each independent peak within a site.
 peaks <- peaks %>%
   dplyr::distinct(site_no, peak_id, peak_date, peak_flow,
-                  pot_threshold_cfs, search_radius,
+                  candidate_threshold_cfs, search_radius,
                   antecedent_runoff_mm, antecedent_days_used)
 
 message(sprintf("Peaks: %d across %d sites",
@@ -164,7 +185,11 @@ mixed_rain_frac <- classified %>%
                 rain_frac < RAIN_FRAC_THRESH) %>%
   dplyr::pull(rain_frac)
 
-MIXED_SPLIT <- median(mixed_rain_frac)
+MIXED_SPLIT <- if (is.null(CLASS_CONFIG$mixed_split)) {
+  median(mixed_rain_frac)
+} else {
+  CLASS_CONFIG$mixed_split
+}
 
 message(sprintf("  Mixed events (n)  : %d", length(mixed_rain_frac)))
 message(sprintf("  MIXED_SPLIT       : %.4f", MIXED_SPLIT))
@@ -195,13 +220,17 @@ classified <- classified %>%
     ),
     flood_type = factor(flood_type_raw,
                         levels = c("rainfall", "snowmelt",
-                                   "rain_on_snow", "unclassified"))
+                                   "rain_on_snow", "unclassified")),
+    # water_year() is defined in functions.R
+    water_year   = water_year(peak_date),
+    fit_eligible = dplyr::coalesce(
+      data_sufficient & !is.na(rain_frac) & flux_sufficient, FALSE)
   )
 
 # ============================================================================
-# PRE-SELECTION SUMMARY
+# SUMMARY
 # ============================================================================
-message("\n=== CLASSIFICATION SUMMARY (pre-selection) ===")
+message("\n=== CLASSIFICATION SUMMARY ===")
 type_counts <- classified %>%
   dplyr::count(flood_type) %>%
   dplyr::mutate(pct = n / sum(n) * 100)
@@ -218,122 +247,35 @@ reg_summary <- classified %>%
   dplyr::count(regulated, flood_type) %>%
   dplyr::mutate(pct = n / sum(n) * 100)
 
-message("\n=== BY REGULATION STATUS (pre-selection) ===")
+message("\n=== BY REGULATION STATUS ===")
 message(paste(capture.output(print(reg_summary)), collapse = "\n"))
 
-# ============================================================================
-# YU ET AL. (2022) TOP-N PEAK SELECTION
-# ============================================================================
-message("\nApplying Yu et al. (2022) top-n peak selection...")
+# Per-site type counts, for reference only. The minimum-count rule is
+# applied in Script 7 to exceedances of each type's fitting threshold.
+site_type_counts <- classified %>%
+  dplyr::filter(flood_type_raw != "unclassified") %>%
+  dplyr::count(site_no, flood_type_raw)
 
-# water_year() is defined in functions.R
-
-classified <- classified %>%
-  dplyr::mutate(water_year = water_year(peak_date))
-
-# Single-sample: largest m independent peaks per site, ranked directly by
-# peak flow with no per-water-year cap.
-# m = max(MIN_SINGLE_SAMPLE, number of unique water years at site).
-# Shares the flux_sufficient eligibility criterion with the type-conditioned
-# classification, so both the single-sample and per-type pools exclude the
-# same suspected model/observation-mismatch peaks.
-single_sample_ids <- classified %>%
-  dplyr::filter(data_sufficient & !is.na(rain_frac) & flux_sufficient) %>%
-  dplyr::group_by(site_no) %>%
-  dplyr::mutate(m    = pmax(MIN_SINGLE_SAMPLE, dplyr::n_distinct(water_year)),
-                rank = dplyr::row_number(dplyr::desc(peak_flow))) %>%
-  dplyr::filter(rank <= m) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(site_no, peak_id) %>%
-  dplyr::mutate(in_single_sample = TRUE)
-
-# Per-type: largest n independent peaks per (site, type), ranked directly by
-# peak flow with no per-water-year cap.
-# Types with fewer than MIN_TYPE_SAMPLE events at a site are dropped entirely.
-type_sample_ids <- classified %>%
-  dplyr::filter(flood_type != "unclassified") %>%
-  dplyr::group_by(site_no, flood_type) %>%
-  dplyr::mutate(n    = pmax(MIN_TYPE_SAMPLE, dplyr::n_distinct(water_year)),
-                rank = dplyr::row_number(dplyr::desc(peak_flow))) %>%
-  dplyr::filter(rank <= n) %>%
-  dplyr::filter(dplyr::n() >= MIN_TYPE_SAMPLE) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(site_no, peak_id, flood_type) %>%
-  dplyr::mutate(in_type_sample = TRUE)
-
-classified <- classified %>%
-  dplyr::left_join(single_sample_ids, by = c("site_no", "peak_id")) %>%
-  dplyr::left_join(
-    type_sample_ids %>% dplyr::select(site_no, peak_id, in_type_sample),
-    by = c("site_no", "peak_id")
-  ) %>%
-  dplyr::mutate(
-    in_single_sample = tidyr::replace_na(in_single_sample, FALSE),
-    in_type_sample   = tidyr::replace_na(in_type_sample,   FALSE)
-  )
-
-# Demote types that did not meet MIN_TYPE_SAMPLE at a given site to
-# "unclassified". in_single_sample is unaffected by this demotion.
-retained_site_types <- type_sample_ids %>% dplyr::distinct(site_no, flood_type)
-
-classified <- classified %>%
-  dplyr::mutate(flood_type = dplyr::if_else(
-    flood_type != "unclassified" &
-      !paste(site_no, flood_type) %in%
-        paste(retained_site_types$site_no, retained_site_types$flood_type),
-    "unclassified",
-    as.character(flood_type)
-  )) %>%
-  dplyr::mutate(flood_type = factor(flood_type,
-                                    levels = c("rainfall", "snowmelt",
-                                               "rain_on_snow", "unclassified")))
-
-# ============================================================================
-# POST-SELECTION SUMMARY
-# ============================================================================
-message("\n=== CLASSIFICATION SUMMARY (post-selection) ===")
-type_counts_post <- classified %>%
-  dplyr::count(flood_type) %>%
-  dplyr::mutate(pct = n / sum(n) * 100)
-
-purrr::walk2(type_counts_post$flood_type, type_counts_post$n, function(t, n) {
-  pct <- type_counts_post$pct[type_counts_post$flood_type == t]
-  message(sprintf("  %-14s : %5d  (%5.1f%%)", t, n, pct))
-})
-
-selection_summary <- classified %>%
-  dplyr::group_by(site_no) %>%
-  dplyr::summarise(
-    n_single_sample = sum(in_single_sample),
-    n_rainfall      = sum(flood_type == "rainfall"     & in_type_sample),
-    n_snowmelt      = sum(flood_type == "snowmelt"     & in_type_sample),
-    n_rain_on_snow  = sum(flood_type == "rain_on_snow" & in_type_sample),
-    .groups = "drop"
-  )
-
-message(sprintf("\nSites with >= %d single-sample peaks : %d",
-                MIN_SINGLE_SAMPLE,
-                sum(selection_summary$n_single_sample >= MIN_SINGLE_SAMPLE)))
-message(sprintf("Sites with >= %d rainfall peaks      : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_rainfall     >= MIN_TYPE_SAMPLE)))
-message(sprintf("Sites with >= %d snowmelt peaks      : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_snowmelt     >= MIN_TYPE_SAMPLE)))
-message(sprintf("Sites with >= %d rain-on-snow peaks  : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_rain_on_snow >= MIN_TYPE_SAMPLE)))
+for (t in c("rainfall", "snowmelt", "rain_on_snow")) {
+  message(sprintf("Sites with >= 20 %-12s peaks (all magnitudes): %d", t,
+                  sum(site_type_counts$flood_type_raw == t & site_type_counts$n >= 20)))
+}
 
 # ============================================================================
 # SAVE
 # ============================================================================
 
-# Attach MIXED_SPLIT as an attribute so downstream scripts and diagnostics
-# can retrieve the threshold value without re-reading the raw data.
+# Attach MIXED_SPLIT and the config as attributes so downstream scripts and
+# diagnostics can retrieve the thresholds without re-reading the raw data.
 attr(classified, "mixed_split")       <- MIXED_SPLIT
 attr(classified, "rain_frac_thresh")  <- RAIN_FRAC_THRESH
 attr(classified, "n_mixed_events")    <- length(mixed_rain_frac)
+attr(classified, "class_config")      <- CLASS_CONFIG
 
 saveRDS(classified, output_file)
 message(sprintf("\nSaved %d classified peaks to %s", nrow(classified), output_file))
 message(sprintf("  RAIN_FRAC_THRESH : %.2f", RAIN_FRAC_THRESH))
-message(sprintf("  MIXED_SPLIT      : %.4f", MIXED_SPLIT))
-message(sprintf("  MIN_TYPE_SAMPLE  : %d",   MIN_TYPE_SAMPLE))
+message(sprintf("  MIXED_SPLIT      : %.4f%s", MIXED_SPLIT,
+                if (is.null(CLASS_CONFIG$mixed_split)) " (population median)" else " (fixed)"))
+message(sprintf("  NOISE_FLOOR_MM   : %.2f", NOISE_FLOOR_MM))
 message(sprintf("  Columns          : %s",   paste(names(classified), collapse = ", ")))

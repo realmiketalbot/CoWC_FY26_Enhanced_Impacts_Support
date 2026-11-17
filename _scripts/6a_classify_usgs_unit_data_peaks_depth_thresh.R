@@ -21,28 +21,30 @@
 # Completeness: peaks with fewer than 8 days of WLDAS data in the window
 # are marked unclassified (complete_window = FALSE).
 #
-# Peak selection follows Yu et al. (2022):
-#   - Per-type selection and demotion applied first; types with fewer than
-#     MIN_TYPE_SAMPLE events are demoted to "unclassified" before
-#     single-sample selection.
-#   - Single sample: largest m independent events where m = max(25, n_water_years),
-#                    ranked directly by peak flow with no per-water-year cap.
-#   - Per type:      largest n independent events where n = max(20, n_water_years),
-#                    ranked directly by peak flow with no per-water-year cap.
-#   Selection flags stored in in_single_sample and in_type_sample columns.
+# This script only LABELS peaks. It does no sample selection: the Yu et al.
+# (2022) top-n selection and the MIN_TYPE_SAMPLE demotion were removed for
+# milestone M1 (see _planning/agu2026_interim_plan.md, item U2). Magnitude
+# filtering happens in Script 7, through each flood type's fitting threshold.
+#
+# fit_eligible marks peaks that could have been classified (complete WLDAS
+# window). It defines the single-sample pool in Script 7, so that pool
+# excludes the same data-insufficient peaks the per-type pools exclude.
+#
+# Thresholds live in CLASS_CONFIG and are written to the output as the
+# "class_config" attribute, so sensitivity runs can be told apart.
 #
 # INPUTS:
 #   - _data/accum_curves_60d.rds  : daily rain/melt per peak (Script 5)
-#   - _data/pot_peaks_all.rds     : POT peaks with pot_threshold_cfs
+#   - _data/pot_peaks_all.rds     : candidate peaks (Script 3)
 #   - _data/site_metadata.rds     : regulated flag, basin attributes
 #
 # OUTPUT:
-#   - _data/pot_peaks_classified_depth_thresh.rds : peaks with flood_type,
-#       flood_type_raw, pot_threshold_cfs, water_year,
-#       in_single_sample, in_type_sample, complete_window,
-#       total_rain_mm, total_melt_mm, n_days_wldas
-#       (flood_type_raw retains the threshold-based label before any
-#       sample-size demotion; flood_type is the final classification)
+#   - _data/pot_peaks_classified_depth_thresh.rds : one row per peak with
+#       site_no, peak_id, peak_date, peak_flow, candidate_threshold_cfs,
+#       total_rain_mm, total_melt_mm, n_days_wldas, complete_window,
+#       regulated, flood_type_raw, flood_type, water_year, fit_eligible
+#       flood_type is an exact factor copy of flood_type_raw, kept for one
+#       release so existing consumers keep working. To be removed in M2.
 # ============================================================================
 
 library(tidyverse)
@@ -57,16 +59,21 @@ peaks_file   <- "_data/pot_peaks_all.rds"
 meta_file    <- "_data/site_metadata.rds"
 output_file  <- "_data/pot_peaks_classified_depth_thresh.rds"
 
-# Davenport et al. (2020) thresholds (mm over 8-day window)
-ANTECEDENT_DAYS  <-  8   # lookback_day 1 (peak day) through 8
-THRESH_RAIN_HIGH <- 10
-THRESH_RAIN_LOW  <-  5
-THRESH_MELT_HIGH <- 10
-THRESH_MELT_LOW  <-  5
+# Davenport et al. (2020) thresholds (mm over 8-day window). Defaults
+# reproduce the initial results; change them here for sensitivity runs.
+CLASS_CONFIG <- list(
+  antecedent_days  =  8,   # lookback_day 1 (peak day) through 8
+  thresh_rain_high = 10,
+  thresh_rain_low  =  5,
+  thresh_melt_high = 10,
+  thresh_melt_low  =  5
+)
 
-# Yu et al. (2022) top-n sample size thresholds
-MIN_SINGLE_SAMPLE <- 25
-MIN_TYPE_SAMPLE   <- 20
+ANTECEDENT_DAYS  <- CLASS_CONFIG$antecedent_days
+THRESH_RAIN_HIGH <- CLASS_CONFIG$thresh_rain_high
+THRESH_RAIN_LOW  <- CLASS_CONFIG$thresh_rain_low
+THRESH_MELT_HIGH <- CLASS_CONFIG$thresh_melt_high
+THRESH_MELT_LOW  <- CLASS_CONFIG$thresh_melt_low
 
 # ============================================================================
 # LOAD DATA
@@ -77,14 +84,14 @@ peaks <- readRDS(peaks_file) %>%
   mutate(peak_date = as.Date(peak_date))
 meta  <- readRDS(meta_file)
 
-if (!"pot_threshold_cfs" %in% names(peaks)) {
-  stop("pot_threshold_cfs column not found in pot_peaks_all.rds. ",
+if (!"candidate_threshold_cfs" %in% names(peaks)) {
+  stop("candidate_threshold_cfs column not found in pot_peaks_all.rds. ",
        "Re-run Script 3 to regenerate.")
 }
 
 # Deduplicate to one row per peak (pot_peaks_all is one row per peak-window day)
 peaks <- peaks %>%
-  distinct(site_no, peak_id, peak_date, peak_flow, pot_threshold_cfs)
+  distinct(site_no, peak_id, peak_date, peak_flow, candidate_threshold_cfs)
 
 message(sprintf("Peaks: %d across %d sites",
                 nrow(peaks), n_distinct(peaks$site_no)))
@@ -132,10 +139,18 @@ classified <- peaks %>%
                         levels = c("rainfall", "snowmelt", "rain_on_snow", "unclassified"))
   )
 
+# water_year() and fit_eligible
+# water_year() is defined in functions.R
+classified <- classified %>%
+  mutate(
+    water_year   = water_year(peak_date),
+    fit_eligible = coalesce(complete_window, FALSE)
+  )
+
 # ============================================================================
-# PRE-SELECTION SUMMARY
+# SUMMARY
 # ============================================================================
-message("\n=== CLASSIFICATION SUMMARY (pre-selection) ===")
+message("\n=== CLASSIFICATION SUMMARY ===")
 type_counts <- classified %>%
   dplyr::count(flood_type) %>%
   mutate(pct = n / sum(n) * 100)
@@ -148,104 +163,24 @@ walk2(type_counts$flood_type, type_counts$n, function(t, n) {
 message(sprintf("\nTotal peaks: %d | Sites: %d",
                 nrow(classified), n_distinct(classified$site_no)))
 
-# ============================================================================
-# YU ET AL. (2022) TOP-N PEAK SELECTION
-# ============================================================================
-message("\nApplying Yu et al. (2022) top-n peak selection...")
+# Per-site type counts, for reference only. The minimum-count rule is
+# applied in Script 7 to exceedances of each type's fitting threshold.
+site_type_counts <- classified %>%
+  filter(flood_type_raw != "unclassified") %>%
+  count(site_no, flood_type_raw)
 
-# water_year() is defined in functions.R
-
-classified <- classified %>%
-  mutate(water_year = water_year(peak_date))
-
-# Single-sample selection precedes demotion, following Yu et al. (2022):
-# the single-sample pool is drawn from all peaks irrespective of flood type,
-# before any per-type MIN_TYPE_SAMPLE filtering. Only peaks unclassified by
-# data insufficiency are excluded.
-single_sample_ids <- classified %>%
-  filter(complete_window) %>%
-  group_by(site_no) %>%
-  mutate(m    = pmax(MIN_SINGLE_SAMPLE, n_distinct(water_year)),
-         rank = row_number(desc(peak_flow))) %>%
-  filter(rank <= m) %>%
-  ungroup() %>%
-  select(site_no, peak_id) %>%
-  mutate(in_single_sample = TRUE)
-
-# Per-type selection: top-n per (site, flood_type, water_year), retained only
-# for site-types reaching MIN_TYPE_SAMPLE.
-type_sample_ids <- classified %>%
-  filter(flood_type != "unclassified") %>%
-  group_by(site_no, flood_type) %>%
-  mutate(n    = pmax(MIN_TYPE_SAMPLE, n_distinct(water_year)),
-         rank = row_number(desc(peak_flow))) %>%
-  filter(rank <= n) %>%
-  filter(n() >= MIN_TYPE_SAMPLE) %>%
-  ungroup() %>%
-  select(site_no, peak_id, flood_type) %>%
-  mutate(in_type_sample = TRUE)
-
-retained_site_types <- type_sample_ids %>% distinct(site_no, flood_type)
-
-# Demote types below MIN_TYPE_SAMPLE to "unclassified". in_single_sample has
-# already been assigned and is unaffected.
-classified <- classified %>%
-  mutate(flood_type = if_else(
-    flood_type != "unclassified" &
-      !paste(site_no, flood_type) %in%
-        paste(retained_site_types$site_no, retained_site_types$flood_type),
-    "unclassified",
-    as.character(flood_type)
-  )) %>%
-  mutate(flood_type = factor(flood_type,
-                             levels = c("rainfall", "snowmelt", "rain_on_snow", "unclassified")))
-
-classified <- classified %>%
-  left_join(type_sample_ids %>% select(site_no, peak_id, in_type_sample),
-            by = c("site_no", "peak_id")) %>%
-  left_join(single_sample_ids, by = c("site_no", "peak_id")) %>%
-  mutate(
-    in_single_sample = replace_na(in_single_sample, FALSE),
-    in_type_sample   = replace_na(in_type_sample,   FALSE)
-  )
-
-# ============================================================================
-# POST-SELECTION SUMMARY
-# ============================================================================
-message("\n=== CLASSIFICATION SUMMARY (post-selection) ===")
-type_counts_post <- classified %>%
-  dplyr::count(flood_type) %>%
-  mutate(pct = n / sum(n) * 100)
-
-walk2(type_counts_post$flood_type, type_counts_post$n, function(t, n) {
-  pct <- type_counts_post$pct[type_counts_post$flood_type == t]
-  message(sprintf("  %-14s : %5d  (%5.1f%%)", t, n, pct))
-})
-
-selection_summary <- classified %>%
-  group_by(site_no) %>%
-  summarise(
-    n_single_sample = sum(in_single_sample),
-    n_rainfall      = sum(flood_type == "rainfall"     & in_type_sample),
-    n_snowmelt      = sum(flood_type == "snowmelt"     & in_type_sample),
-    n_rain_on_snow  = sum(flood_type == "rain_on_snow" & in_type_sample),
-    .groups = "drop"
-  )
-
-message(sprintf("\nSites with >= %d single-sample peaks : %d",
-                MIN_SINGLE_SAMPLE,
-                sum(selection_summary$n_single_sample >= MIN_SINGLE_SAMPLE)))
-message(sprintf("Sites with >= %d rainfall peaks      : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_rainfall    >= MIN_TYPE_SAMPLE)))
-message(sprintf("Sites with >= %d snowmelt peaks      : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_snowmelt    >= MIN_TYPE_SAMPLE)))
-message(sprintf("Sites with >= %d rain_on_snow peaks  : %d",
-                MIN_TYPE_SAMPLE, sum(selection_summary$n_rain_on_snow >= MIN_TYPE_SAMPLE)))
+for (t in c("rainfall", "snowmelt", "rain_on_snow")) {
+  message(sprintf("Sites with >= 20 %-12s peaks (all magnitudes): %d", t,
+                  sum(site_type_counts$flood_type_raw == t & site_type_counts$n >= 20)))
+}
 
 # ============================================================================
 # SAVE
 # ============================================================================
+attr(classified, "class_config") <- CLASS_CONFIG
+
 saveRDS(classified, output_file)
 message(sprintf("\nSaved %d classified peaks to %s", nrow(classified), output_file))
-message(sprintf("  MIN_TYPE_SAMPLE  : %d", MIN_TYPE_SAMPLE))
-message(sprintf("  Columns: %s", paste(names(classified), collapse = ", ")))
+message(sprintf("  Config  : %s",
+                paste(names(CLASS_CONFIG), unlist(CLASS_CONFIG), sep = "=", collapse = ", ")))
+message(sprintf("  Columns : %s", paste(names(classified), collapse = ", ")))

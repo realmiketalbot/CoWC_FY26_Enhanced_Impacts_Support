@@ -4,7 +4,11 @@
 > **Parent plan:** `_planning/chapter1_methods_alignment_plan.md` (workstream IDs such as WS3.1 refer to it)
 > **Source:** `_documentation/Preliminary_Proposal.pdf`, Ch. 1 §1.2–1.3, App. A
 > **Deadline:** poster print in ~2 weeks (target ≈ 2026-12-01)
-> **Status:** Phase 0 done (tags). Phase U not started. D-E open.
+> **Status (2026-11-17):** Phase 0 done (tags). Phase U code done on branch `agu2026-m1` (U1–U4).
+> A local dry run of the new 6a/6b on baseline inputs passed all 15 classification invariants.
+> **Next:** HPC rerun of Scripts 3 → 5 → 6a/6b → 8 → 9, then the full U4 check. Script 7 and
+> `report_figures.R` won't run against the new outputs until Phase F (they still read the removed
+> top-*n* columns).
 
 ## 1. The stopping point
 

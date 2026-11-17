@@ -231,6 +231,23 @@ empirical_ri <- function(peaks) {
     ungroup()
 }
 
+## ── Flood-type remap (Script 7, report_figures.R, App) ──────────────────────
+##
+## Collapses the 3-class rain-fraction labels to 2 classes: snowmelt and
+## rain_on_snow become snow_influenced. Works from flood_type_raw, the only
+## label column after M1, and overwrites flood_type with the 2-class label.
+SNOW_INFLUENCED_TYPES <- c("rain_on_snow", "snowmelt")
+
+remap_2class <- function(peaks) {
+  raw <- as.character(peaks$flood_type_raw)
+  peaks$flood_type <- factor(
+    ifelse(raw %in% SNOW_INFLUENCED_TYPES, "snow_influenced",
+           ifelse(raw == "rainfall", "rainfall", "unclassified")),
+    levels = c("rainfall", "snow_influenced", "unclassified")
+  )
+  peaks
+}
+
 ## ── Shared utility helpers (Scripts 6a, 6b, 8, 9) ─────────────────────────────
 
 ## Water year: WY Y runs Oct 1 of (Y-1) through Sep 30 of Y.
