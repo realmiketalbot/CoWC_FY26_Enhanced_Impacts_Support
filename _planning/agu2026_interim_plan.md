@@ -17,8 +17,10 @@
 > 500 yr; mixture ≥ single at 27% of sites at 2 yr and 85% at 100 yr. The initial results had ratios of
 > 1.26–1.69 and ≥ 1 at ~97% of sites. The largest ratios come from heavy-tailed type fits
 > (ξ > 0.5 in ~17% of type fits, ~31 exceedances each).
-> **Next:** decide poster framing and panels (S1–S4), `report_figures.R` updates, then Phase A. Script 7 and `report_figures.R` won't run against the
-> new outputs until Phase F (they still read the removed top-*n* columns).
+> **Poster (decided 2026-11-17):** show only the new Poisson–GPD results (mixture vs single sample by
+> annual return period); no comparison with the initial results (S2 dropped). Report up to 100 yr;
+> 500 yr is marked indicative until the M3 bootstrap intervals exist (D-F).
+> **Next:** choose poster panels, update `report_figures.R` to read `ffa_*_pgpd.rds`, then Phase A.
 
 ## 1. The stopping point
 
@@ -125,7 +127,7 @@ confirm that directly, so any difference can be traced without needing separate 
 | # | Item | Parent WS | Why it's cheap now |
 |---|---|---|---|
 | S1 | **Dispersion index** at the interim u_i, per (site, type), with χ² bounds (App. A.2), over the complete water years (`n_wy_complete`). Map or histogram showing over- and under-dispersion. | WS4.4 | Only needs annual counts above u_i |
-| S2 | **Old vs new** Q100 mixture/single ratio (Yu-GPD vs Poisson–GPD). This is a direct "sensitivity to model specification" result and fits the chapter title. | RQ4 framing | Both outputs exist after Z1 and F7 |
+| S2 | ~~Old vs new Q100 mixture/single ratio~~ **Dropped (2026-11-17):** the poster shows only the new results. | — | — |
 | S3 | **Interim-threshold sensitivity**: rerun F3 at 2–3 rule settings and show how the ratio by return period moves. It shows *why* EQD is needed. | WS4.1-lite | It's a loop over Script 7 |
 | S4 | **Rain-fraction α sensitivity**: rerun 6b at 2–3 (α_r, α_s) settings through the U2 config. | WS4.2-lite | The config is already in place after U2 |
 
@@ -219,6 +221,10 @@ extraction. The invariant check is site-aware: it compares the 201 common sites.
 (α_s) is a network median and moves with the site set, so 3-class label swaps between the old and new
 split are allowed and verified. A local simulation on the 201 common sites moved the split from
 0.3120 to 0.3100 and swapped 24 of 59,871 labels.
+
+**D-F (settled 2026-11-17): return-period range on the poster.** Results are reported up to 100 yr.
+500 yr is shown but marked indicative, since there are no uncertainty intervals until M3 and
+~17% of type fits are heavy-tailed (ξ > 0.5).
 
 **Site-count preference (user, 2026-11-17):** a smaller final set of watersheds is acceptable if it
 improves analysis quality. Record-quality screens (e.g., a minimum number of observed flood-season
