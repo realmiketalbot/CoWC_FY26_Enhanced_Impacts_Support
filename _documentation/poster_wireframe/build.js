@@ -40,9 +40,11 @@ const placeholder = (label, x, y, w, h) => {
 };
 // Place a figure at its exported size (w x h inches)
 const fig = (file, x, y, w, h) => { s.addImage({ path: path.join(FIG, file), x, y, w, h }); return y + h; };
+// Lists are inset from the section boxes by LIST_PAD so bullets don't sit flush with the box edge.
+const LIST_PAD = 0.35;
 const bullets = (items, x, y, w, h, size = 24) =>
   text(items.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < items.length - 1, paraSpaceAfter: 6 } })),
-       x, y, w, h, { fontSize: size });
+       x + LIST_PAD, y, w - LIST_PAD, h, { fontSize: size });
 
 // ---- header band ----
 placeholder("AGU26 logo", M, 0.6, 4.5, 3.4);
@@ -153,7 +155,7 @@ text([
   { text: "1  Floods at nearly all Colorado gages come from more than one process (91% of sites)", options: { breakLine: true, paraSpaceAfter: 8 } },
   { text: "2  Mixture and single-sample estimates agree for common floods and diverge for rare ones, most strongly above 3,000 m", options: { breakLine: true, paraSpaceAfter: 8 } },
   { text: "3  Separating rain-on-snow from snowmelt matters most. Is that split physically distinct?" },
-], x, y, W, 4.2, { fontSize: 21 });
+], x + LIST_PAD, y, W - LIST_PAD, 4.2, { fontSize: 21 });
 y += 4.2 + 0.2;
 y = header("Next steps", x, y, W);
 const qr = 2.4;
