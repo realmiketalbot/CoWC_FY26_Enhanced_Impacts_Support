@@ -36,30 +36,36 @@ qual_years <- split(qual$water_year, qual$site_no)
 n_qual  <- qual %>% count(site_no, name = "n_qual_years")
 
 MAIN_METHOD <- "frac_thresh_3class"
+SHOWCASE_SITE <- "09115500"   # Tomichi Creek at Sargents (see poster_showcase.R)
 RP_BREAKS   <- c(2, 5, 10, 25, 50, 100, 200, 500)
 
-method_labels <- c(depth_thresh       = "Depth threshold",
-                   frac_thresh_3class = "Rain fraction (3-class)",
-                   frac_thresh_2class = "Rain fraction (2-class)")
-method_colors <- c("Rain fraction (3-class)" = "#1b7837",
-                   "Rain fraction (2-class)" = "#7fbf7b",
-                   "Depth threshold"         = "#762a83")
+# Labels and colours follow the Hydrology Days 2026 talk (Set1 type colours;
+# "Fixed" = depth threshold, "Adaptive" = rain fraction). Method colours avoid
+# the type colours.
+method_labels <- c(depth_thresh       = "Fixed",
+                   frac_thresh_3class = "Adaptive (3-class)",
+                   frac_thresh_2class = "Adaptive (2-class)")
+method_colors <- c("Adaptive (3-class)" = "black",
+                   "Adaptive (2-class)" = "#FF7F00",
+                   "Fixed"              = "#A65628")
 
 type_labels <- c(rainfall = "Rainfall", snowmelt = "Snowmelt", rain_on_snow = "Rain-on-Snow",
-                 snow_influenced = "Snow-Influenced", unclassified = "Unclassified",
-                 mixture = "Mixture", single_sample = "Single sample")
-type_colors <- c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac", "Rain-on-Snow" = "#9970ab",
-                 "Snow-Influenced" = "#5e3c99", "Unclassified" = "#d9d9d9",
-                 "Mixture" = "black", "Single sample" = "grey55")
+                 snow_influenced = "Non-Rainfall", unclassified = "Unclassified",
+                 mixture = "Mixture", single_sample = "Single Sample")
+type_colors <- c("Rainfall" = "#E41A1C", "Snowmelt" = "#377EB8", "Rain-on-Snow" = "#4DAF4A",
+                 "Non-Rainfall" = "#984EA3", "Unclassified" = "#CCCCCC",
+                 "Mixture" = "black", "Single Sample" = "grey55")
 
 theme_poster <- theme_bw(base_size = 13) +
   theme(panel.grid.minor = element_blank(),
-        plot.subtitle = element_text(size = 11, face = "italic", colour = "grey30"),
+        plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(size = 11, colour = "grey40"),
         legend.position = "bottom")
 
 # Shading for the indicative range (> 100 yr)
 indicative_layer <- function(ymin = -Inf, ymax = Inf) list(
-  annotate("rect", xmin = 100, xmax = Inf, ymin = ymin, ymax = ymax, fill = "grey85", alpha = 0.5),
+  annotate("rect", xmin = 100, xmax = Inf, ymin = ymin, ymax = ymax, fill = "grey92"),
+  geom_vline(xintercept = 100, linetype = "dashed"),
   annotate("text", x = 220, y = Inf, label = "indicative", vjust = 1.5, size = 3.5,
            colour = "grey35", fontface = "italic"))
 rp_axis <- scale_x_log10(breaks = RP_BREAKS, name = "Annual return period (years)")
@@ -90,8 +96,8 @@ co_map <- function(data, ...) {
     geom_sf(data = data, ...) +
     coord_sf(xlim = bb[c("xmin", "xmax")], ylim = bb[c("ymin", "ymax")]) +
     theme_void(base_size = 13) +
-    theme(legend.position = "right",
-          plot.subtitle = element_text(size = 11, face = "italic", colour = "grey30"))
+    theme(legend.position = "right", plot.title = element_text(face = "bold"),
+          plot.subtitle = element_text(size = 11, colour = "grey40"))
 }
 
 # Mixture / single-sample ratio per site x method x return period
@@ -132,7 +138,7 @@ comp <- bind_rows(
   mutate(lab = if_else(fit_eligible, lab, "unclassified")) %>%
   count(method, lab) %>% group_by(method) %>% mutate(pct = n / sum(n)) %>% ungroup() %>%
   mutate(method = factor(method_labels[method], levels = method_labels),
-         lab = factor(type_labels[lab], levels = c("Unclassified", "Snowmelt", "Snow-Influenced",
+         lab = factor(type_labels[lab], levels = c("Unclassified", "Snowmelt", "Non-Rainfall",
                                                    "Rain-on-Snow", "Rainfall")))
 p <- ggplot(comp, aes(method, pct, fill = lab)) +
   geom_col(width = 0.7) +
@@ -141,7 +147,7 @@ p <- ggplot(comp, aes(method, pct, fill = lab)) +
   scale_fill_manual(values = type_colors, name = NULL) +
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(x = NULL, y = "Share of candidate peaks", title = "Flood-type composition by classification method",
-       subtitle = "All candidate peaks. Unclassified: outside both depth criteria (depth method) or insufficient WLDAS data") +
+       subtitle = "All candidate peaks. Unclassified: Fixed criteria not met, or insufficient WLDAS data") +
   theme_poster
 save_fig("02_composition_by_method.png", p, 7, 5)
 
@@ -153,7 +159,7 @@ p <- co_map(stations %>% inner_join(rain_share, by = "site_no"),
   scale_colour_distiller(palette = "RdBu", direction = -1, labels = scales::percent,
                          name = "Rainfall\npeaks") +
   labs(title = "Share of flood peaks driven by rainfall",
-       subtitle = "Rain fraction (3-class); eligible peaks in qualifying water years")
+       subtitle = "Adaptive (3-class); eligible peaks in qualifying water years")
 save_fig("03_rainfall_share_map.png", p, 7, 5)
 
 # ============================================================================
@@ -186,7 +192,7 @@ p <- ratios %>% filter(method == MAIN_METHOD) %>%
   scale_y_log10() +
   labs(x = "Annual return period (years)", y = "Mixture / single-sample discharge (log scale)",
        title = "Mixture vs single-sample ratio across sites",
-       subtitle = "Rain fraction (3-class); shaded = indicative (> 100 yr)") +
+       subtitle = "Adaptive (3-class); shaded = indicative (> 100 yr)") +
   theme_poster
 save_fig("04b_ratio_distribution_3class.png", p, 7, 5)
 
@@ -210,7 +216,9 @@ p <- co_map(stations %>% inner_join(r100, by = "site_no"), aes(colour = log(rati
                          limits = c(-lim, lim), labels = function(x) round(exp(x), 2),
                          name = "Q100 ratio\n(mixture /\nsingle sample)") +
   labs(title = "Mixture vs single-sample 100-year flood",
-       subtitle = "Rain fraction (3-class), Poisson–GPD")
+       subtitle = "Adaptive (3-class), Poisson–GPD. Circled: showcase site (Tomichi Creek)") +
+  geom_sf(data = stations %>% filter(site_no == SHOWCASE_SITE), shape = 21, size = 5.5,
+          stroke = 1.1, colour = "black", fill = NA)
 save_fig("06_ratio_map_q100.png", p, 7, 5)
 
 ## 07 Mixture vs single sample, Q100 scatter (by elevation) ----
@@ -257,7 +265,7 @@ p <- dominant %>% count(return_period, lab) %>% group_by(return_period) %>% muta
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(x = "Annual return period (years)", y = "Share of sites",
        title = "Which flood type produces the largest floods?",
-       subtitle = "Type with the highest quantile at each site; rain fraction (3-class)") +
+       subtitle = "Type with the highest quantile at each site; Adaptive (3-class)") +
   theme_poster
 save_fig("09_dominant_type_by_rp.png", p, 7, 5)
 
@@ -306,7 +314,7 @@ plot_example <- function(s) {
     scale_y_log10(labels = scales::label_comma(), name = "Peak discharge (cfs)") +
     scale_colour_manual(values = type_colors, name = NULL, drop = TRUE) +
     scale_linetype_manual(values = c("Rainfall" = "solid", "Snowmelt" = "solid", "Rain-on-Snow" = "solid",
-                                     "Mixture" = "solid", "Single sample" = "dashed"), name = NULL) +
+                                     "Mixture" = "solid", "Single Sample" = "dashed"), name = NULL) +
     labs(title = sprintf("%s (%s)", site_name(s), s),
          subtitle = sprintf("Q100 ratio = %.2f", ratio)) +
     theme_poster + theme(plot.title = element_text(size = 11))
@@ -323,7 +331,7 @@ save_fig("11_example_curves_panel.png", p, 15, 5.5)
 
 ## 12 Shape parameter distribution ----
 xi_df <- ffa_p %>% filter(method == MAIN_METHOD) %>%
-  mutate(lab = factor(type_labels[curve_type], levels = c("Rainfall", "Snowmelt", "Rain-on-Snow", "Single sample")))
+  mutate(lab = factor(type_labels[curve_type], levels = c("Rainfall", "Snowmelt", "Rain-on-Snow", "Single Sample")))
 p <- ggplot(xi_df, aes(lab, xi, fill = lab)) +
   annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0.5, ymax = Inf, fill = "#fddbc7", alpha = 0.6) +
   geom_hline(yintercept = 0, colour = "grey40") +
@@ -349,7 +357,7 @@ disp <- ffa_p %>% filter(method == MAIN_METHOD) %>%
            lo = qchisq(0.025, M - 1) / (M - 1), hi = qchisq(0.975, M - 1) / (M - 1))
   }) %>%
   mutate(status = case_when(D < lo ~ "Under-dispersed", D > hi ~ "Over-dispersed", TRUE ~ "Consistent with Poisson"),
-         lab = factor(type_labels[curve_type], levels = c("Rainfall", "Snowmelt", "Rain-on-Snow", "Single sample")))
+         lab = factor(type_labels[curve_type], levels = c("Rainfall", "Snowmelt", "Rain-on-Snow", "Single Sample")))
 disp_share <- disp %>% group_by(lab) %>%
   summarise(txt = sprintf("%.0f%% within", 100 * mean(status == "Consistent with Poisson")), .groups = "drop")
 p <- ggplot(disp, aes(lab, D)) +
