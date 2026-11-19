@@ -64,8 +64,7 @@ bullets([
   "Q: Does a mixed-population FFA change design-flood estimates, at which return periods, and where?",
 ], x, y, W, 3.6, 22);
 y += 3.6;
-placeholder("Schematic: three flood-type curves combining into a mixture", x, y, W, 2.9);
-y += 2.9 + G;
+y = fig("02b_peak_timing_by_type.png", x, y, W, 1200 / 300) + G;
 
 y = header("Each peak classified by rain fraction", x, y, W);
 bullets([
@@ -110,6 +109,7 @@ const tree = (x0, y0, w) => {
 };
 y = tree(x, y, W) + 0.1;
 y = fig("02_composition_by_method.png", x, y, W, 2100 / 300);
+console.log("column 1 ends at", y.toFixed(2), "of", BOT);
 
 // ---- columns 2–3: example site + headline result ----
 x = colX(1); y = TOP;

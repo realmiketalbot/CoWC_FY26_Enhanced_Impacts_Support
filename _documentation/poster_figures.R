@@ -162,6 +162,28 @@ p <- ggplot(comp, aes(method, pct, fill = lab)) +
   theme_poster
 save_fig("02_composition_by_method.png", p)
 
+## 02b Peak timing by flood type (motivation panel) ----
+timing <- peaks %>%
+  filter(fit_eligible, flood_type_raw %in% c("rainfall", "snowmelt", "rain_on_snow")) %>%
+  mutate(month = factor(month.abb[as.integer(format(peak_date, "%m"))], levels = month.abb),
+         lab = factor(type_labels[flood_type_raw], levels = c("Snowmelt", "Rain-on-Snow", "Rainfall"))) %>%
+  count(lab, month, .drop = FALSE) %>%
+  group_by(lab) %>% mutate(share = n / sum(n)) %>% ungroup()
+p <- ggplot(timing, aes(month, share, fill = lab)) +
+  geom_col(width = 0.8) +
+  facet_grid(lab ~ ., switch = "y") +
+  scale_fill_manual(values = type_colors, guide = "none") +
+  scale_y_continuous(labels = scales::percent_format(1), breaks = c(0, 0.25, 0.5), position = "right",
+                     expand = expansion(mult = c(0, 0.08))) +
+  labs(x = NULL, y = NULL, title = "Each flood type peaks in its own season") +
+  theme_poster +
+  theme(strip.placement = "outside", strip.background = element_blank(),
+        strip.text.y.left = element_text(angle = 0, hjust = 1, face = "bold", size = TXT$legend),
+        panel.grid.major.x = element_blank(), panel.spacing = unit(0.3, "lines"))
+save_fig("02b_peak_timing_by_type.png", p, PANEL_W, 4)
+message(sprintf("    peak months: %s", paste(timing %>% group_by(lab) %>% slice_max(share, n = 2) %>%
+  summarise(m = paste(month, collapse = "/")) %>% mutate(t = paste(lab, m)) %>% pull(t), collapse = "; ")))
+
 ## 03 Share of rainfall peaks per site (map) ----
 rain_share <- pool %>% group_by(site_no) %>%
   summarise(rain_share = mean(flood_type_raw == "rainfall"), .groups = "drop")
