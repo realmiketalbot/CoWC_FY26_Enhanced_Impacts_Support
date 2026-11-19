@@ -73,9 +73,10 @@ bullets([
   "215 USGS gages [2], WY 1986–2023; ≥ 20 years with ≥ 90% May–Sep coverage",
   "Independent peaks, declustered [3, 4]",
   "WLDAS [5] rainfall + snowmelt over a basin-scaled antecedent window [6]",
-  "Poisson–GPD [7] per flood type (L-moments [8, 9]); mixture = product of annual-maximum CDFs, vs one fit to all peaks",
-], x, y, W, 4.6, 20);
-y += 4.6;
+  "Rain fraction = rain / (rain + snowmelt), the inverse of the snow fraction of Kampf and Lefsky [7]",
+  "Poisson–GPD [8] per flood type (L-moments [9, 10]); mixture = product of annual-maximum CDFs, vs one fit to all peaks",
+], x, y, W, 5.3, 20);
+y += 5.3;
 
 // Native decision tree (editable). Current Script 6b rules.
 const tree = (x0, y0, w) => {
@@ -118,7 +119,7 @@ x = colX(1); y = TOP;
 y = header("At Tomichi Creek, the mixture rises above the single sample for rare floods", x, y, W2);
 y = fig("showcase/09115500_A_fixed_vs_adaptive3.png", x, y, W2, 3000 / 300);
 bullets([
-  "The depth threshold method [10] misses many peaks, so its mixture falls below observed common floods; the rain fraction method tracks the observations",
+  "The depth threshold method [11] misses many peaks, so its mixture falls below observed common floods; the rain fraction method tracks the observations",
   "100-yr mixture / single sample: 1.30 (rain fraction, 3-class) vs 1.16 (depth threshold)",
 ], x, y + 0.05, W2, 1.4, 22);
 y += 1.45 + G;
@@ -160,7 +161,7 @@ y += 4.2 + 0.2;
 y = header("Next steps", x, y, W);
 const qr = 2.4;
 bullets([
-  "EQD threshold selection [11]; double-bootstrap confidence intervals",
+  "EQD threshold selection [12]; double-bootstrap confidence intervals",
   "Rain-on-snow vs snowmelt diagnostic; goodness-of-fit",
   "Trends: no detectable change in annual-maximum flood type (1986–2023)",
 ], x, y, W - qr - 0.2, qr, 17);
@@ -177,6 +178,7 @@ const REFS = [
   "Lang M, Ouarda TBMJ, Bobée B. Towards operational guidelines for over-threshold modeling. J Hydrol. 1999;225:103–117.",
   "Erlingis JM et al. A high-resolution land data assimilation system optimized for the western United States. JAWRA. 2021;57:692–710.",
   "Livneh B et al. Can precipitation intermittency predict flooding? Sci Total Environ. 2024;945:173824.",
+  "Kampf SK, Lefsky MA. Transition of dominant peak flow source from snowmelt to rainfall along the Colorado Front Range: Historical patterns, trends, and lessons from the 2013 Colorado Front Range floods. Water Resour Res. 2016;52:407–422.",
   "Beguería S. Uncertainties in partial duration series modelling of extremes related to the choice of the threshold value. J Hydrol. 2005;303:215–230.",
   "Hosking JRM, Wallis JR. Parameter and quantile estimation for the generalized Pareto distribution. Technometrics. 1987;29:339–349.",
   "Asquith W. lmomco: L-moments, censored L-moments, trimmed L-moments, L-comoments, and many distributions. R package; 2026.",
