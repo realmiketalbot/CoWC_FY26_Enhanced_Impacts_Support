@@ -20,6 +20,10 @@
 > **Poster (decided 2026-11-17):** show only the new Poisson–GPD results (mixture vs single sample by
 > annual return period); no comparison with the initial results (S2 dropped). Return periods to
 > 500 yr are shown without shading or caveats (D-F, revised 2026-11-19).
+> **Poster title (2026-11-19):** the abstract title without the site count: "A Regional
+> Mixed-Population Flood Frequency Analysis: Insights from Colorado".
+> **PIN (QR code):** the abstract's QR/short link (https://col.st/wr18c) points to the current
+> dashboard. Repoint it, or make a new QR code, once the AGU app (D-D) is deployed.
 > **Next:** choose poster panels, update `report_figures.R` to read `ffa_*_pgpd.rds`, then Phase A.
 
 ## 1. The stopping point
