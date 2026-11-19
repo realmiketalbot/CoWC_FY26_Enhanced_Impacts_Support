@@ -7,7 +7,7 @@
 #   B  Adaptive (3-class) vs Adaptive (2-class)
 # Style follows the talk: Set1 type colours, dashed per-type curves, black
 # mixture, grey single sample, dashed line at 100 yr. New Poisson–GPD fits;
-# annual return periods; > 100 yr shaded as indicative (plan D-F).
+# annual return periods to 500 yr (plan D-F, revised 2026-11-19).
 #
 # Candidates were screened (2026-11-19) for: unregulated; all three types
 # fitted (3-class); Q100 mixture/single ratio > 1 under every method and under
@@ -64,7 +64,6 @@ panel <- function(s, m, ylim, brks) {
   cv <- curves %>% filter(site_no == s, method == m, is.finite(discharge_cfs)) %>%
     mutate(lab = labels[curve_type])
   ggplot() +
-    annotate("rect", xmin = 100, xmax = Inf, ymin = 0, ymax = Inf, fill = "grey92") +
     geom_vline(xintercept = 100, linetype = "dashed") +
     geom_point(data = ss_pts, aes(ri, peak_flow, shape = "Observed (single sample)"),
                colour = "grey45", size = 2.6, stroke = 0.6) +

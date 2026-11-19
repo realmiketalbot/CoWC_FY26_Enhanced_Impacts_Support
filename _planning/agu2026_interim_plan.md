@@ -18,8 +18,8 @@
 > 1.26–1.69 and ≥ 1 at ~97% of sites. The largest ratios come from heavy-tailed type fits
 > (ξ > 0.5 in ~17% of type fits, ~31 exceedances each).
 > **Poster (decided 2026-11-17):** show only the new Poisson–GPD results (mixture vs single sample by
-> annual return period); no comparison with the initial results (S2 dropped). Report up to 100 yr;
-> 500 yr is marked indicative until the M3 bootstrap intervals exist (D-F).
+> annual return period); no comparison with the initial results (S2 dropped). Return periods to
+> 500 yr are shown without shading or caveats (D-F, revised 2026-11-19).
 > **Next:** choose poster panels, update `report_figures.R` to read `ffa_*_pgpd.rds`, then Phase A.
 
 ## 1. The stopping point
@@ -222,9 +222,10 @@ extraction. The invariant check is site-aware: it compares the 201 common sites.
 split are allowed and verified. A local simulation on the 201 common sites moved the split from
 0.3120 to 0.3100 and swapped 24 of 59,871 labels.
 
-**D-F (settled 2026-11-17): return-period range on the poster.** Results are reported up to 100 yr.
-500 yr is shown but marked indicative, since there are no uncertainty intervals until M3 and
-~17% of type fits are heavy-tailed (ξ > 0.5).
+**D-F (revised 2026-11-19): return-period range on the poster.** Return periods up to 500 yr are
+shown without "indicative" shading or hedging; the poster as a whole is presented as preliminary.
+(Originally, 2026-11-17: report to 100 yr and mark 500 yr indicative.) Context for questions: no
+uncertainty intervals until M3, and ~17% of type fits are heavy-tailed (ξ > 0.5).
 
 **Site-count preference (user, 2026-11-17):** a smaller final set of watersheds is acceptable if it
 improves analysis quality. Record-quality screens (e.g., a minimum number of observed flood-season

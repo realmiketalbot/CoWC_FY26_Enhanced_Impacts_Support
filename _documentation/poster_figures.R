@@ -4,8 +4,8 @@
 # ============================================================================
 # Every candidate panel for the poster, built from the M1 Poisson–GPD outputs
 # (Script 7). Only the new results are shown; there is no comparison with the
-# initial results. Return periods are ANNUAL. Results beyond 100 yr are
-# marked indicative until the M3 bootstrap intervals exist (plan D-F).
+# initial results. Return periods are ANNUAL, shown to 500 yr without
+# shading or caveats (plan D-F, revised 2026-11-19).
 #
 # Run from the repo root:  Rscript _documentation/poster_figures.R
 # Sensitivity panels (S3, S4) need _data/sensitivity_ratio_summary.rds from
@@ -62,12 +62,8 @@ theme_poster <- theme_bw(base_size = 13) +
         plot.subtitle = element_text(size = 11, colour = "grey40"),
         legend.position = "bottom")
 
-# Shading for the indicative range (> 100 yr)
-indicative_layer <- function(ymin = -Inf, ymax = Inf) list(
-  annotate("rect", xmin = 100, xmax = Inf, ymin = ymin, ymax = ymax, fill = "grey92"),
-  geom_vline(xintercept = 100, linetype = "dashed"),
-  annotate("text", x = 220, y = Inf, label = "indicative", vjust = 1.5, size = 3.5,
-           colour = "grey35", fontface = "italic"))
+# Dashed reference line at the 100-yr return period (as in the Hydrology Days talk)
+indicative_layer <- function(...) list(geom_vline(xintercept = 100, linetype = "dashed"))
 rp_axis <- scale_x_log10(breaks = RP_BREAKS, name = "Annual return period (years)")
 
 save_fig <- function(name, p, w = 7, h = 5) {
@@ -185,14 +181,13 @@ save_fig("04_ratio_by_return_period.png", p, 7, 5)
 ## 04b Same, main method only, with the site-level spread ----
 p <- ratios %>% filter(method == MAIN_METHOD) %>%
   ggplot(aes(factor(return_period), ratio)) +
-  annotate("rect", xmin = 6.5, xmax = Inf, ymin = -Inf, ymax = Inf, fill = "grey85", alpha = 0.5) +
   geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
   geom_violin(fill = "#1b7837", alpha = 0.25, colour = NA, scale = "width") +
   geom_boxplot(width = 0.18, outlier.size = 0.8, fill = "white") +
   scale_y_log10() +
   labs(x = "Annual return period (years)", y = "Mixture / single-sample discharge (log scale)",
        title = "Mixture vs single-sample ratio across sites",
-       subtitle = "Adaptive (3-class); shaded = indicative (> 100 yr)") +
+       subtitle = "Adaptive (3-class)") +
   theme_poster
 save_fig("04b_ratio_distribution_3class.png", p, 7, 5)
 
@@ -260,7 +255,6 @@ dominant <- type_q %>% group_by(site_no, return_period) %>%
 p <- dominant %>% count(return_period, lab) %>% group_by(return_period) %>% mutate(pct = n / sum(n)) %>%
   ggplot(aes(factor(return_period), pct, fill = lab)) +
   geom_col(width = 0.75) +
-  annotate("rect", xmin = 6.5, xmax = Inf, ymin = -Inf, ymax = Inf, fill = "white", alpha = 0.35) +
   scale_fill_manual(values = type_colors, name = "Largest flood type") +
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(x = "Annual return period (years)", y = "Share of sites",
