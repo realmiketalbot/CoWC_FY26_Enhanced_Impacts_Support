@@ -5,7 +5,7 @@
 # Paired panels per candidate site:
 #   A  Fixed (depth threshold) vs Adaptive (3-class rain fraction)
 #   B  Adaptive (3-class) vs Adaptive (2-class)
-# Style follows the talk: Set1 type colours, dashed per-type curves, black
+# Style follows the talk: dashboard type colours, dashed per-type curves, black
 # mixture, grey single sample, dashed line at 100 yr. New Poisson–GPD fits;
 # annual return periods to 500 yr (plan D-F, revised 2026-11-19).
 #
@@ -43,8 +43,9 @@ method_titles <- c(depth_thresh = "Fixed", frac_thresh_3class = "Adaptive (3-cla
                    frac_thresh_2class = "Adaptive (2-class)")
 labels <- c(rainfall = "Rainfall", snowmelt = "Snowmelt", rain_on_snow = "Rain-on-Snow",
             snow_influenced = "Non-Rainfall", mixture = "Mixture", single_sample = "Single Sample")
-colors <- c("Rainfall" = "#E41A1C", "Snowmelt" = "#377EB8", "Rain-on-Snow" = "#4DAF4A",
-            "Non-Rainfall" = "#984EA3", "Mixture" = "black", "Single Sample" = "grey55")
+# Flood-type colours match the dashboard (app.R type_colors).
+colors <- c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac", "Rain-on-Snow" = "#9970ab",
+            "Non-Rainfall" = "#9970ab", "Mixture" = "black", "Single Sample" = "#888888")
 ltys   <- c("Rainfall" = "dashed", "Snowmelt" = "dashed", "Rain-on-Snow" = "dashed",
             "Non-Rainfall" = "dashed", "Mixture" = "solid", "Single Sample" = "solid")
 RP_BREAKS <- c(2, 5, 10, 25, 50, 100, 200, 500)

@@ -39,7 +39,7 @@ MAIN_METHOD <- "frac_thresh_3class"
 SHOWCASE_SITE <- "09115500"   # Tomichi Creek at Sargents (see poster_showcase.R)
 RP_BREAKS   <- c(2, 5, 10, 25, 50, 100, 200, 500)
 
-# Labels and colours follow the Hydrology Days 2026 talk (Set1 type colours;
+# Labels and colours follow the Hydrology Days 2026 talk (type colours match the dashboard;
 # "Fixed" = depth threshold, "Adaptive" = rain fraction). Method colours avoid
 # the type colours.
 method_labels <- c(depth_thresh       = "Fixed",
@@ -52,9 +52,10 @@ method_colors <- c("Adaptive (3-class)" = "black",
 type_labels <- c(rainfall = "Rainfall", snowmelt = "Snowmelt", rain_on_snow = "Rain-on-Snow",
                  snow_influenced = "Non-Rainfall", unclassified = "Unclassified",
                  mixture = "Mixture", single_sample = "Single Sample")
-type_colors <- c("Rainfall" = "#E41A1C", "Snowmelt" = "#377EB8", "Rain-on-Snow" = "#4DAF4A",
-                 "Non-Rainfall" = "#984EA3", "Unclassified" = "#CCCCCC",
-                 "Mixture" = "black", "Single Sample" = "grey55")
+# Flood-type colours match the dashboard (app.R type_colors) and report figures.
+type_colors <- c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac", "Rain-on-Snow" = "#9970ab",
+                 "Non-Rainfall" = "#9970ab", "Unclassified" = "#cccccc",
+                 "Mixture" = "black", "Single Sample" = "#888888")
 
 # ---- Print sizing (carried over from the AGU 2025 poster) -------------------
 # Figures are exported at exactly their placed size on the 42 x 36 in poster,

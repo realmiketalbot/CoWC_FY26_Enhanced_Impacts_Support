@@ -9,7 +9,7 @@ const FIG = "/Users/mtalbot/Desktop/GitHub/CoWC_FY26_Enhanced_Impacts_Support/_d
 const OUT = process.argv[2];
 
 const GREEN = "1E4D2B", GOLD = "C8C372", GREY = "F2F2F2", DARK = "222222", MUTED = "595959";
-const C_RAIN = "E41A1C", C_SNOW = "377EB8", C_ROS = "4DAF4A", C_UNC = "CCCCCC", C_DIAM = "FFF5C2";
+const C_RAIN = "B2182B", C_SNOW = "2166AC", C_ROS = "9970AB", C_UNC = "CCCCCC", C_DIAM = "FFF5C2";
 const FONT = "Arial";
 
 const pres = new pptxgen();

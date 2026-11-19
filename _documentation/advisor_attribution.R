@@ -234,7 +234,7 @@ s_old <- old_sets[[which(map_chr(old_sets, "site_no") == MECH_SITE)]]
 RI_D  <- c(seq(1.1, 2, 0.05), seq(2.2, 10, 0.2), seq(11, 500, 1))
 lab_of <- c(rainfall = "Rainfall", snowmelt = "Snowmelt", rain_on_snow = "Rain-on-Snow",
             single_sample = "Single Sample", mixture = "Mixture")
-col_of <- c("Rainfall" = "#E41A1C", "Snowmelt" = "#377EB8", "Rain-on-Snow" = "#4DAF4A",
+col_of <- c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac", "Rain-on-Snow" = "#9970ab",
             "Single Sample" = "grey50", "Mixture" = "black")
 
 mech <- map_dfr(c(FALSE, TRUE), function(keep_loc) {
