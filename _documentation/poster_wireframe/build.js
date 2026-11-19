@@ -63,17 +63,17 @@ y = header("Colorado floods have more than one cause", x, y, W);
 bullets([
   "Flood frequency analysis (FFA) assumes peaks come from one, identically distributed population",
   "Colorado floods arise from rainfall, snowmelt and rain-on-snow, which may follow different distributions",
-  "Q: Does a mixed-population FFA change design-flood estimates, at which return periods, and where?",
+  "Q: Does a mixed-population FFA [1] change design-flood estimates, at which return periods, and where?",
 ], x, y, W, 3.6, 22);
 y += 3.6;
 y = fig("02b_peak_timing_by_type.png", x, y, W, 1200 / 300) + G;
 
 y = header("Each peak classified by rain fraction", x, y, W);
 bullets([
-  "215 USGS gages, WY 1986–2023; ≥ 20 years with ≥ 90% May–Sep coverage",
-  "Independent peaks (USWRC/Lang declustering)",
-  "WLDAS rainfall + snowmelt over a basin-scaled antecedent window",
-  "Poisson–GPD per flood type (L-moments); mixture = product of annual-maximum CDFs, vs one fit to all peaks",
+  "215 USGS gages [2], WY 1986–2023; ≥ 20 years with ≥ 90% May–Sep coverage",
+  "Independent peaks, declustered [3, 4]",
+  "WLDAS [5] rainfall + snowmelt over a basin-scaled antecedent window [6]",
+  "Poisson–GPD [7] per flood type (L-moments [8, 9]); mixture = product of annual-maximum CDFs, vs one fit to all peaks",
 ], x, y, W, 4.6, 20);
 y += 4.6;
 
@@ -118,7 +118,7 @@ x = colX(1); y = TOP;
 y = header("At Tomichi Creek, the mixture rises above the single sample for rare floods", x, y, W2);
 y = fig("showcase/09115500_A_fixed_vs_adaptive3.png", x, y, W2, 3000 / 300);
 bullets([
-  "The depth threshold method misses many peaks, so its mixture falls below observed common floods; the rain fraction method tracks the observations",
+  "The depth threshold method [10] misses many peaks, so its mixture falls below observed common floods; the rain fraction method tracks the observations",
   "100-yr mixture / single sample: 1.30 (rain fraction, 3-class) vs 1.16 (depth threshold)",
 ], x, y + 0.05, W2, 1.4, 22);
 y += 1.45 + G;
@@ -160,12 +160,32 @@ y += 4.2 + 0.2;
 y = header("Next steps", x, y, W);
 const qr = 2.4;
 bullets([
-  "EQD threshold selection; double-bootstrap confidence intervals",
+  "EQD threshold selection [11]; double-bootstrap confidence intervals",
   "Rain-on-snow vs snowmelt diagnostic; goodness-of-fit",
   "Trends: no detectable change in annual-maximum flood type (1986–2023)",
-], x, y, W - qr - 0.2, BOT - y - 0.5, 17);
+], x, y, W - qr - 0.2, qr, 17);
 placeholder("New QR\n(PIN)", x + W - qr, y, qr, qr);
-text("Funding: FY26 CoWC Enhanced Impacts Initiative  |  References", x, BOT - 0.5, W, 0.5,
+y += qr + G;
+
+// References: entries from the Preliminary Proposal's bibliography, in the
+// numbered style of the AGU 2025 poster (10.5 pt).
+y = header("References", x, y, W);
+const REFS = [
+  "Yu G, Wright DB, Davenport FV. Diverse physical processes drive upper-tail flood quantiles in the US Mountain West. Geophys Res Lett. 2022;49:e2022GL098855.",
+  "Falcone JA. GAGES-II: Geospatial Attributes of Gages for Evaluating Streamflow. U.S. Geological Survey; 2011. doi:10.3133/70046617",
+  "USWRC. Guidelines for determining flood flow frequency: Bulletin 17. U.S. Water Resources Council; 1975.",
+  "Lang M, Ouarda TBMJ, Bobée B. Towards operational guidelines for over-threshold modeling. J Hydrol. 1999;225:103–117.",
+  "Erlingis JM et al. A high-resolution land data assimilation system optimized for the western United States. JAWRA. 2021;57:692–710.",
+  "Livneh B et al. Can precipitation intermittency predict flooding? Sci Total Environ. 2024;945:173824.",
+  "Beguería S. Uncertainties in partial duration series modelling of extremes related to the choice of the threshold value. J Hydrol. 2005;303:215–230.",
+  "Hosking JRM, Wallis JR. Parameter and quantile estimation for the generalized Pareto distribution. Technometrics. 1987;29:339–349.",
+  "Asquith W. lmomco: L-moments, censored L-moments, trimmed L-moments, L-comoments, and many distributions. R package; 2026.",
+  "Davenport FV, Herrera-Estrada JE, Burke M, Diffenbaugh NS. Flood size increases nonlinearly across the western United States in response to lower snow-precipitation ratios. Water Resour Res. 2020;56:e2019WR025571.",
+  "Murphy C, Tawn JA, Varty Z. Automated threshold selection and associated inference uncertainty for univariate extremes. Technometrics. 2025;67:215–224.",
+];
+text(REFS.map((r, i) => ({ text: `${i + 1}. ${r}`, options: { breakLine: i < REFS.length - 1, paraSpaceAfter: 2 } })),
+     x + LIST_PAD, y, W - LIST_PAD, BOT - y - 0.45, { fontSize: 10.5 });
+text("Funding: FY26 Colorado Water Center Enhanced Impacts Initiative", x, BOT - 0.4, W, 0.4,
      { fontSize: 14, color: MUTED, valign: "bottom" });
 
 console.log("column 4 ends at", y.toFixed(2), "of", BOT);
