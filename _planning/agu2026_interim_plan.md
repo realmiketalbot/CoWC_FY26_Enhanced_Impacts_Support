@@ -66,6 +66,13 @@ The sign of the shape flips. This resolves the ⚠️ in parent WS3.1. **Fix: pa
 The initial results in the proposal (§1.3, Fig. 1.4) have this defect. That's worth knowing, but
 it doesn't need to be raised on the poster, because M1 supersedes those numbers anyway.
 
+**Attribution (2026-11-19, `_documentation/advisor_attribution.R`):** applying the corrections one at
+a time to the old samples shows this defect explains nearly all of the change in the mixture/single
+ratio (median 1.70 → 0.91 at RI 2; 1.26 → 1.07 at RI 100). The discarded location is roughly the gap
+between μ and the smallest sampled peak, and it is largest for the single sample, so the single-sample
+curve dropped most. Moving u to the sampled peaks alone has a similar effect. The switch to annual
+return periods and the new station set/classification change the ratio only slightly.
+
 There is a related issue. The current single μ is the site **median** daily max, but the fitted sample is the
 top-*n* peaks, which mostly sit well above the median. The excesses therefore don't start near 0, and
 a GPD with a fixed lower bound of 0 fits them poorly. Per-type u_i (item F3) fixes this.
