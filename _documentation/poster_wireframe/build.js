@@ -105,7 +105,7 @@ const tree = (x0, y0, w) => {
   arrow(cx + dw / 2, r3, ox - ew / 2, r3, "Yes", cx + dw / 2 + 0.1, r3 - 0.42);
   node(pres.shapes.OVAL, "Snowmelt", cx, r4, ew, eh, C_SNOW, "FFFFFF", true);
   arrow(cx, r3 + dh / 2, cx, r4 - eh / 2, "No", cx + 0.1, r3 + dh / 2);
-  text("2-class: Rain-on-Snow + Snowmelt = Non-Rainfall", x0, r4 + eh / 2 + 0.05, w, 0.45,
+  text("2-class: Rain-on-Snow + Snowmelt = Snow-Influenced", x0, r4 + eh / 2 + 0.05, w, 0.45,
        { fontSize: 16, italic: true, color: MUTED, align: "center" });
   return r4 + eh / 2 + 0.55;
 };
@@ -118,8 +118,8 @@ x = colX(1); y = TOP;
 y = header("At Tomichi Creek, the mixture rises above the single sample for rare floods", x, y, W2);
 y = fig("showcase/09115500_A_fixed_vs_adaptive3.png", x, y, W2, 3000 / 300);
 bullets([
-  "Fixed misses many peaks, so its mixture falls below observed common floods; Adaptive tracks the observations",
-  "100-yr mixture / single sample: 1.30 (Adaptive 3-class) vs 1.16 (Fixed)",
+  "The depth threshold method misses many peaks, so its mixture falls below observed common floods; the rain fraction method tracks the observations",
+  "100-yr mixture / single sample: 1.30 (rain fraction, 3-class) vs 1.16 (depth threshold)",
 ], x, y + 0.05, W2, 1.4, 22);
 y += 1.45 + G;
 
@@ -127,7 +127,7 @@ y = header("Estimates agree for common floods and diverge for rare ones", x, y, 
 fig("04_ratio_by_return_period.png", x, y, W, 2100 / 300);
 y = fig("06_ratio_map_q100.png", x + W + G, y, W, 2100 / 300) + 0.2;
 const stats = [["85%", "of sites: mixture > single sample at 100 yr"],
-               ["+10%", "median difference at 100 yr (Adaptive 3-class)"],
+               ["+10%", "median difference at 100 yr (rain fraction, 3-class)"],
                ["~0%", "median difference at 2 yr"]];
 const sw = (W2 - 2 * G) / 3, sh = 2.2;
 stats.forEach(([big, small], i) => {
@@ -140,7 +140,7 @@ y += sh + 0.15;
 text([{ text: "Robust to analysis choices: ", options: { bold: true } },
       { text: "median 100-yr ratio 1.05–1.28 across fitting thresholds and 1.10–1.16 across rain-fraction cutoffs. " },
       { text: "Depends on classification: ", options: { bold: true } },
-      { text: "Fixed 1.16, Adaptive 3-class 1.10, Adaptive 2-class 1.01, so separating rain-on-snow from snowmelt drives most of it." }],
+      { text: "depth threshold 1.16, rain fraction 3-class 1.10, rain fraction 2-class 1.01, so separating rain-on-snow from snowmelt drives most of it." }],
      x, y, W2, BOT - y, { fontSize: 20 });
 
 // ---- column 4: elevation, flood type, takeaways, next steps ----

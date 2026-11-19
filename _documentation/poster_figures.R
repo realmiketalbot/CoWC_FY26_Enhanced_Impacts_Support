@@ -40,21 +40,21 @@ SHOWCASE_SITE <- "09115500"   # Tomichi Creek at Sargents (see poster_showcase.R
 RP_BREAKS   <- c(2, 5, 10, 25, 50, 100, 200, 500)
 
 # Labels and colours follow the Hydrology Days 2026 talk (type colours match the dashboard;
-# "Fixed" = depth threshold, "Adaptive" = rain fraction). Method colours avoid
+# method and flood-type labels follow the dashboard and proposal). Method colours avoid
 # the type colours.
-method_labels <- c(depth_thresh       = "Fixed",
-                   frac_thresh_3class = "Adaptive (3-class)",
-                   frac_thresh_2class = "Adaptive (2-class)")
-method_colors <- c("Adaptive (3-class)" = "black",
-                   "Adaptive (2-class)" = "#FF7F00",
-                   "Fixed"              = "#A65628")
+method_labels <- c(depth_thresh       = "Depth threshold",
+                   frac_thresh_3class = "Rain fraction (3-class)",
+                   frac_thresh_2class = "Rain fraction (2-class)")
+method_colors <- c("Rain fraction (3-class)" = "black",
+                   "Rain fraction (2-class)" = "#FF7F00",
+                   "Depth threshold"         = "#A65628")
 
 type_labels <- c(rainfall = "Rainfall", snowmelt = "Snowmelt", rain_on_snow = "Rain-on-Snow",
-                 snow_influenced = "Non-Rainfall", unclassified = "Unclassified",
+                 snow_influenced = "Snow-Influenced", unclassified = "Unclassified",
                  mixture = "Mixture", single_sample = "Single Sample")
 # Flood-type colours match the dashboard (app.R type_colors) and report figures.
 type_colors <- c("Rainfall" = "#b2182b", "Snowmelt" = "#2166ac", "Rain-on-Snow" = "#9970ab",
-                 "Non-Rainfall" = "#9970ab", "Unclassified" = "#cccccc",
+                 "Snow-Influenced" = "#2166ac", "Unclassified" = "#cccccc",
                  "Mixture" = "black", "Single Sample" = "#888888")
 
 # ---- Print sizing (carried over from the AGU 2025 poster) -------------------
@@ -150,15 +150,22 @@ comp <- bind_rows(
   mutate(lab = if_else(fit_eligible, lab, "unclassified")) %>%
   count(method, lab) %>% group_by(method) %>% mutate(pct = n / sum(n)) %>% ungroup() %>%
   mutate(method = factor(method_labels[method], levels = method_labels),
-         lab = factor(type_labels[lab], levels = c("Unclassified", "Snowmelt", "Non-Rainfall",
+         lab = factor(type_labels[lab], levels = c("Unclassified", "Snowmelt", "Snow-Influenced",
                                                    "Rain-on-Snow", "Rainfall")))
-p <- ggplot(comp, aes(method, pct, fill = lab)) +
-  geom_col(width = 0.7) +
+# Snow-Influenced (2-class) = snowmelt blue with rain-on-snow purple stripes,
+# as in the dashboard and report figures.
+type_patterns <- c("Rainfall" = "none", "Snowmelt" = "none", "Rain-on-Snow" = "none",
+                   "Snow-Influenced" = "stripe", "Unclassified" = "none")
+p <- ggplot(comp, aes(method, pct, fill = lab, pattern = lab)) +
+  ggpattern::geom_col_pattern(width = 0.7, colour = NA, pattern_fill = "#9970ab", pattern_colour = NA,
+                              pattern_density = 0.5, pattern_spacing = 0.04, pattern_angle = 45,
+                              pattern_key_scale_factor = 0.5) +
   geom_text(aes(label = ifelse(pct > 0.04, scales::percent(pct, 1), "")),
             position = position_stack(vjust = 0.5), colour = "white", size = pt_mm(16)) +
   scale_fill_manual(values = type_colors, name = NULL) +
+  ggpattern::scale_pattern_manual(values = type_patterns, name = NULL) +
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
-  labs(x = NULL, y = "Share of candidate peaks", title = "Adaptive classifies nearly every peak",
+  labs(x = NULL, y = "Share of candidate peaks", title = "Rain fraction classifies nearly every peak",
        subtitle = "Share of all candidate peaks, by method") +
   theme_poster
 save_fig("02_composition_by_method.png", p)
@@ -193,7 +200,7 @@ p <- co_map(stations %>% inner_join(rain_share, by = "site_no"),
   scale_colour_distiller(palette = "RdBu", direction = -1, labels = scales::percent,
                          name = "Rainfall\npeaks") +
   labs(title = "Share of flood peaks driven by rainfall",
-       subtitle = "Adaptive (3-class); eligible peaks in qualifying water years")
+       subtitle = "Rain fraction (3-class); eligible peaks in qualifying water years")
 save_fig("03_rainfall_share_map.png", p)
 
 # ============================================================================
@@ -225,7 +232,7 @@ p <- ratios %>% filter(method == MAIN_METHOD) %>%
   scale_y_log10() +
   labs(x = "Annual return period (years)", y = "Mixture / single-sample discharge (log scale)",
        title = "Mixture vs single-sample ratio across sites",
-       subtitle = "Adaptive (3-class)") +
+       subtitle = "Rain fraction (3-class)") +
   theme_poster
 save_fig("04b_ratio_distribution_3class.png", p)
 
@@ -249,7 +256,7 @@ p <- co_map(stations %>% inner_join(r100, by = "site_no"), aes(colour = log(rati
                          limits = c(-lim, lim), labels = function(x) round(exp(x), 2),
                          name = "Q100 ratio\n(mixture /\nsingle sample)") +
   labs(title = "Mixture higher across most of Colorado",
-       subtitle = "Adaptive (3-class), Poisson–GPD. Circled: showcase site (Tomichi Creek)") +
+       subtitle = "Rain fraction (3-class), Poisson–GPD. Circled: showcase site (Tomichi Creek)") +
   geom_sf(data = stations %>% filter(site_no == SHOWCASE_SITE), shape = 21, size = 7,
           stroke = 1.1, colour = "black", fill = NA)
 save_fig("06_ratio_map_q100.png", p)
@@ -299,7 +306,7 @@ p <- ggplot(elev, aes(band_n, ratio)) +
   scale_y_log10(breaks = c(0.7, 0.8, 1, 1.25, 1.5, 2), expand = expansion(mult = c(0.05, 0.12))) +
   labs(x = "Mean basin elevation", y = "Q100 mixture / single sample",
        title = "Mixture effect grows with elevation",
-       subtitle = sprintf("Adaptive (3-class); Spearman ρ = %.2f (p < 0.001)", rho$estimate)) +
+       subtitle = sprintf("Rain fraction (3-class); Spearman ρ = %.2f (p < 0.001)", rho$estimate)) +
   theme_poster
 save_fig("08b_ratio_by_elevation_band.png", p, PANEL_W, 6)
 

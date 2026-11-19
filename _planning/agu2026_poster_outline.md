@@ -5,6 +5,9 @@
 > `_documentation/poster_showcase.R`; numbers are from the M1 Poisson–GPD outputs (Script 7).
 > Related: `agu2026_interim_plan.md` (decisions D-A … D-F, the QR pin).
 
+> Labels follow the dashboard and proposal (depth threshold / rain fraction; snow-influenced), not the
+> Hydrology Days talk (Fixed / Adaptive; non-rainfall). Flood-type colours match the dashboard.
+
 ## Header
 
 - **Title:** A Regional Mixed-Population Flood Frequency Analysis: Insights from Colorado
@@ -34,32 +37,32 @@
   area).
 - **Classification:** WLDAS (Noah-MP) rainfall and snowmelt fluxes summed over an antecedent window
   that scales with basin size.
-  - *Adaptive*: antecedent rain fraction. Rainfall ≥ 0.99; the remaining "mixed" events split at
-    the network median into rain-on-snow and snowmelt (3-class), or kept together as non-rainfall
+  - *Rain fraction*: antecedent rain fraction. Rainfall ≥ 0.99; the remaining "mixed" events split at
+    the network median into rain-on-snow and snowmelt (3-class), or kept together as snow-influenced
     (2-class).
-  - *Fixed*: the antecedent depth thresholds of earlier work, for comparison.
+  - *Depth threshold*: the antecedent depth thresholds of earlier work, for comparison.
 - **Frequency model:** Poisson–GPD per flood type (L-moments; threshold ≈ one exceedance per
   qualifying year, ≥ 20 exceedances). The mixture multiplies the types' annual-maximum distributions.
   It is compared with a single Poisson–GPD fitted to all peaks. Return periods are annual.
 - **Visuals:** the antecedent-window plot and decision tree from the talk (check they don't say
   206), plus `poster_figures/02_composition_by_method.png`.
-  - Callout: *Adaptive classification labels ~98% of peaks, vs ~55% for Fixed.*
+  - Callout: *The rain fraction method labels ~98% of peaks, vs ~55% for the depth threshold method.*
 
 ## 3. Example site: Tomichi Creek at Sargents (09115500)
 
 - **Figure:** `poster_figures/showcase/09115500_A_fixed_vs_adaptive3.png`.
   - Optional: `09115500_B_adaptive3_vs_adaptive2.png`.
 - **Message:**
-  - Fixed misses many peaks, so its mixture falls below observed common floods.
-  - Adaptive tracks the observations.
+  - The depth threshold method misses many peaks, so its mixture falls below observed common floods.
+  - The rain fraction method tracks the observations.
   - The mixture rises above the single sample for rarer floods: 100-yr mixture/single 1.30
-    (Adaptive 3-class) vs 1.16 (Fixed).
+    (rain fraction, 3-class) vs 1.16 (depth threshold).
 
 ## 4. Network results (the core)
 
 1. **Headline:** `poster_figures/04_ratio_by_return_period.png`.
    - *Mixture and single-sample estimates agree for common floods but diverge for rare ones.*
-   - At 100 yr the mixture is higher at 85% of sites (median +10%, Adaptive 3-class).
+   - At 100 yr the mixture is higher at 85% of sites (median +10%, rain fraction 3-class).
    - At 2 yr it is higher at about 27% of sites (median −2%).
 2. **Elevation:** NEW panel, to build. Q100 ratio vs mean basin elevation, or a box plot by band.
    - Median ratio 1.03 below 2,500 m, 1.11 at 2,500–3,000 m, 1.26 above 3,000 m.
@@ -72,14 +75,14 @@
 5. **Robustness:** one line or a small inset; detail in `14_`/`15_` as backup.
    - The divergence holds across fitting thresholds (median Q100 ratio 1.05–1.28) and rain-fraction
      cutoffs (1.10–1.16).
-   - It depends on classification: Fixed 1.16, Adaptive 3-class 1.10, Adaptive 2-class 1.01. So
+   - It depends on classification: depth threshold 1.16, rain fraction 3-class 1.10, rain fraction 2-class 1.01. So
      separating rain-on-snow from snowmelt drives most of it.
 - **Context (text):** 91% of sites (196/215) have at least two flood types each making up ≥ 10% of
   their peaks.
 
 ## 5. Takeaways
 
-1. Floods at nearly all Colorado gages come from more than one process. Adaptive rain-fraction
+1. Floods at nearly all Colorado gages come from more than one process. Rain fraction
    classification labels nearly every peak.
 2. Mixed-population and single-sample estimates agree for common floods and diverge for rare ones.
    The mixture is higher at most sites by the 100-yr flood, most strongly above 3,000 m.
