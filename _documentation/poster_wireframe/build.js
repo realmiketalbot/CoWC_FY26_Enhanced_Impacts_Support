@@ -41,7 +41,7 @@ const placeholder = (label, x, y, w, h) => {
 // Place a figure at its exported size (w x h inches)
 const fig = (file, x, y, w, h) => { s.addImage({ path: path.join(FIG, file), x, y, w, h }); return y + h; };
 // Lists are inset from the section boxes by LIST_PAD so bullets don't sit flush with the box edge.
-const LIST_PAD = 0.35;
+const LIST_PAD = 0.5;
 const bullets = (items, x, y, w, h, size = 24) =>
   text(items.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < items.length - 1, paraSpaceAfter: 6 } })),
        x + LIST_PAD, y, w - LIST_PAD, h, { fontSize: size });
