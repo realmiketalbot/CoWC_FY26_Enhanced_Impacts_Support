@@ -56,18 +56,34 @@ type_colors <- c("Rainfall" = "#E41A1C", "Snowmelt" = "#377EB8", "Rain-on-Snow" 
                  "Non-Rainfall" = "#984EA3", "Unclassified" = "#CCCCCC",
                  "Mixture" = "black", "Single Sample" = "grey55")
 
-theme_poster <- theme_bw(base_size = 13) +
-  theme(panel.grid.minor = element_blank(),
-        plot.title = element_text(face = "bold"),
-        plot.subtitle = element_text(size = 11, colour = "grey40"),
-        legend.position = "bottom")
+# ---- Print sizing (carried over from the AGU 2025 poster) -------------------
+# Figures are exported at exactly their placed size on the 42 x 36 in poster,
+# at 300 dpi, so text prints at these point sizes: title 24, subtitle 18,
+# axis titles and legend 16, tick labels 14. Panel sizes match the wireframe:
+# one column = 9.825 in wide; the wide (two-column) block = 20.15 in.
+PANEL_W <- 9.825
+PANEL_H <- 7
+WIDE_W  <- 20.15
+TXT     <- list(title = 24, subtitle = 18, axis_title = 16, axis_text = 14, legend = 16)
+pt_mm   <- function(pt) pt / ggplot2::.pt          # geom_text size for a point size
+
+poster_text <- theme(
+  plot.title    = element_text(face = "bold", size = TXT$title),
+  plot.subtitle = element_text(size = TXT$subtitle, colour = "grey40"),
+  axis.title    = element_text(size = TXT$axis_title),
+  axis.text     = element_text(size = TXT$axis_text),
+  legend.title  = element_text(size = TXT$legend),
+  legend.text   = element_text(size = TXT$legend),
+  strip.text    = element_text(size = TXT$legend))
+theme_poster <- theme_bw(base_size = 18) + poster_text +
+  theme(panel.grid.minor = element_blank(), legend.position = "bottom")
 
 # Dashed reference line at the 100-yr return period (as in the Hydrology Days talk)
 indicative_layer <- function(...) list(geom_vline(xintercept = 100, linetype = "dashed"))
 rp_axis <- scale_x_log10(breaks = RP_BREAKS, name = "Annual return period (years)")
 
-save_fig <- function(name, p, w = 7, h = 5) {
-  ggsave(file.path(fig_dir, name), p, width = w, height = h, units = "in", dpi = 200)
+save_fig <- function(name, p, w = PANEL_W, h = PANEL_H) {
+  ggsave(file.path(fig_dir, name), p, width = w, height = h, units = "in", dpi = 300, bg = "white")
   message("  ", name)
 }
 
@@ -91,9 +107,8 @@ co_map <- function(data, ...) {
     geom_sf(data = co$state, fill = NA, colour = "grey20", linewidth = 0.5) +
     geom_sf(data = data, ...) +
     coord_sf(xlim = bb[c("xmin", "xmax")], ylim = bb[c("ymin", "ymax")]) +
-    theme_void(base_size = 13) +
-    theme(legend.position = "right", plot.title = element_text(face = "bold"),
-          plot.subtitle = element_text(size = 11, colour = "grey40"))
+    theme_void(base_size = 18) + poster_text +
+    theme(legend.position = "right", axis.title = element_blank(), axis.text = element_blank())
 }
 
 # Mixture / single-sample ratio per site x method x return period
@@ -118,11 +133,11 @@ message("Writing figures to ", fig_dir)
 
 ## 01 Study area: sites coloured by qualifying years ----
 p <- co_map(stations %>% left_join(n_qual, by = "site_no"),
-            aes(colour = n_qual_years), size = 2.2) +
+            aes(colour = n_qual_years), size = 3) +
   scale_colour_viridis_c(name = "Qualifying\nwater years", option = "D", direction = -1) +
   labs(title = "Study area and streamgage network",
        subtitle = sprintf("%d USGS gages, >= 20 qualifying water years (WY1986–2023)", nrow(stations)))
-save_fig("01_study_area_qualifying_years.png", p, 7, 5)
+save_fig("01_study_area_qualifying_years.png", p)
 
 ## 02 Network composition of fitted peaks by method ----
 comp <- bind_rows(
@@ -139,24 +154,24 @@ comp <- bind_rows(
 p <- ggplot(comp, aes(method, pct, fill = lab)) +
   geom_col(width = 0.7) +
   geom_text(aes(label = ifelse(pct > 0.04, scales::percent(pct, 1), "")),
-            position = position_stack(vjust = 0.5), colour = "white", size = 3.6) +
+            position = position_stack(vjust = 0.5), colour = "white", size = pt_mm(16)) +
   scale_fill_manual(values = type_colors, name = NULL) +
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
-  labs(x = NULL, y = "Share of candidate peaks", title = "Flood-type composition by classification method",
-       subtitle = "All candidate peaks. Unclassified: Fixed criteria not met, or insufficient WLDAS data") +
+  labs(x = NULL, y = "Share of candidate peaks", title = "Adaptive classifies nearly every peak",
+       subtitle = "Share of all candidate peaks, by method") +
   theme_poster
-save_fig("02_composition_by_method.png", p, 7, 5)
+save_fig("02_composition_by_method.png", p)
 
 ## 03 Share of rainfall peaks per site (map) ----
 rain_share <- pool %>% group_by(site_no) %>%
   summarise(rain_share = mean(flood_type_raw == "rainfall"), .groups = "drop")
 p <- co_map(stations %>% inner_join(rain_share, by = "site_no"),
-            aes(colour = rain_share), size = 2.2) +
+            aes(colour = rain_share), size = 3) +
   scale_colour_distiller(palette = "RdBu", direction = -1, labels = scales::percent,
                          name = "Rainfall\npeaks") +
   labs(title = "Share of flood peaks driven by rainfall",
        subtitle = "Adaptive (3-class); eligible peaks in qualifying water years")
-save_fig("03_rainfall_share_map.png", p, 7, 5)
+save_fig("03_rainfall_share_map.png", p)
 
 # ============================================================================
 # MAIN RESULT: mixture vs single sample
@@ -170,13 +185,13 @@ p <- ggplot(ratio_sum, aes(return_period, median, colour = method_label, fill = 
   indicative_layer() +
   geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
   geom_ribbon(aes(ymin = q25, ymax = q75), alpha = 0.15, colour = NA) +
-  geom_line(linewidth = 1) + geom_point(size = 2) +
+  geom_line(linewidth = 1.3) + geom_point(size = 3) +
   rp_axis +
   scale_colour_manual(values = method_colors, name = NULL, aesthetics = c("colour", "fill")) +
-  labs(y = "Mixture / single-sample discharge", title = "Where do mixture and single-sample estimates diverge?",
-       subtitle = "Median across sites with interquartile range") +
+  labs(y = "Mixture / single-sample discharge", title = "Estimates diverge only for rare floods",
+       subtitle = "Median across sites, with interquartile range") +
   theme_poster
-save_fig("04_ratio_by_return_period.png", p, 7, 5)
+save_fig("04_ratio_by_return_period.png", p)
 
 ## 04b Same, main method only, with the site-level spread ----
 p <- ratios %>% filter(method == MAIN_METHOD) %>%
@@ -189,32 +204,32 @@ p <- ratios %>% filter(method == MAIN_METHOD) %>%
        title = "Mixture vs single-sample ratio across sites",
        subtitle = "Adaptive (3-class)") +
   theme_poster
-save_fig("04b_ratio_distribution_3class.png", p, 7, 5)
+save_fig("04b_ratio_distribution_3class.png", p)
 
 ## 05 Share of sites where the mixture is higher ----
 p <- ggplot(ratio_sum, aes(return_period, share_ge1, colour = method_label)) +
   indicative_layer() +
   geom_hline(yintercept = 0.5, linetype = "dashed", colour = "grey40") +
-  geom_line(linewidth = 1) + geom_point(size = 2) +
+  geom_line(linewidth = 1.3) + geom_point(size = 3) +
   rp_axis +
   scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
   scale_colour_manual(values = method_colors, name = NULL) +
   labs(y = "Sites where mixture >= single sample", title = "The mixture is higher mainly in the tail") +
   theme_poster
-save_fig("05_share_mixture_higher.png", p, 7, 5)
+save_fig("05_share_mixture_higher.png", p)
 
 ## 06 Ratio map at 100 yr ----
 r100 <- ratios %>% filter(method == MAIN_METHOD, return_period == 100)
 lim  <- max(abs(log(r100$ratio)))
-p <- co_map(stations %>% inner_join(r100, by = "site_no"), aes(colour = log(ratio)), size = 2.4) +
+p <- co_map(stations %>% inner_join(r100, by = "site_no"), aes(colour = log(ratio)), size = 3.2) +
   scale_colour_gradient2(low = "#2166ac", mid = "grey90", high = "#b2182b", midpoint = 0,
                          limits = c(-lim, lim), labels = function(x) round(exp(x), 2),
                          name = "Q100 ratio\n(mixture /\nsingle sample)") +
-  labs(title = "Mixture vs single-sample 100-year flood",
+  labs(title = "Mixture higher across most of Colorado",
        subtitle = "Adaptive (3-class), Poisson–GPD. Circled: showcase site (Tomichi Creek)") +
-  geom_sf(data = stations %>% filter(site_no == SHOWCASE_SITE), shape = 21, size = 5.5,
+  geom_sf(data = stations %>% filter(site_no == SHOWCASE_SITE), shape = 21, size = 7,
           stroke = 1.1, colour = "black", fill = NA)
-save_fig("06_ratio_map_q100.png", p, 7, 5)
+save_fig("06_ratio_map_q100.png", p)
 
 ## 07 Mixture vs single sample, Q100 scatter (by elevation) ----
 p <- r100 %>% left_join(meta %>% select(site_no, elev_mean_m), by = "site_no") %>%
@@ -226,7 +241,7 @@ p <- r100 %>% left_join(meta %>% select(site_no, elev_mean_m), by = "site_no") %
   scale_colour_viridis_c(option = "C", name = "Mean basin\nelevation (m)") +
   labs(title = "Mixture vs single-sample 100-year flood") +
   theme_poster + theme(legend.position = "right")
-save_fig("07_scatter_q100.png", p, 7, 5.5)
+save_fig("07_scatter_q100.png", p)
 
 ## 08 Ratio vs elevation, coloured by rainfall share ----
 p <- r100 %>% left_join(meta %>% select(site_no, elev_mean_m), by = "site_no") %>%
@@ -240,7 +255,30 @@ p <- r100 %>% left_join(meta %>% select(site_no, elev_mean_m), by = "site_no") %
   labs(x = "Mean basin elevation (m)", y = "Q100 ratio (mixture / single sample)",
        title = "Ratio vs elevation") +
   theme_poster + theme(legend.position = "right")
-save_fig("08_ratio_vs_elevation.png", p, 7, 5)
+save_fig("08_ratio_vs_elevation.png", p)
+
+## 08b Ratio by elevation band (poster panel) ----
+elev <- r100 %>% left_join(meta %>% select(site_no, elev_mean_m), by = "site_no") %>%
+  filter(is.finite(elev_mean_m))
+rho <- cor.test(elev$ratio, elev$elev_mean_m, method = "spearman", exact = FALSE)
+band_lab <- c("< 2,500 m", "2,500–3,000 m", "> 3,000 m")
+elev <- elev %>%
+  mutate(band = cut(elev_mean_m, c(-Inf, 2500, 3000, Inf), labels = band_lab, right = FALSE)) %>%
+  group_by(band) %>% mutate(band_n = sprintf("%s\n(n = %d)", band, n())) %>% ungroup() %>%
+  mutate(band_n = factor(band_n, levels = unique(band_n[order(band)])))
+med <- elev %>% group_by(band_n) %>% summarise(m = median(ratio), top = max(ratio), .groups = "drop")
+p <- ggplot(elev, aes(band_n, ratio)) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  geom_jitter(width = 0.18, height = 0, size = 2.4, alpha = 0.45, colour = "#1E4D2B") +
+  geom_boxplot(width = 0.45, fill = NA, outlier.shape = NA, linewidth = 0.9) +
+  geom_label(data = med, aes(band_n, top, label = sprintf("median %.2f", m)),
+             vjust = -0.4, size = pt_mm(16), label.size = 0, fill = "white") +
+  scale_y_log10(breaks = c(0.7, 0.8, 1, 1.25, 1.5, 2), expand = expansion(mult = c(0.05, 0.12))) +
+  labs(x = "Mean basin elevation", y = "Q100 mixture / single sample",
+       title = "Mixture effect grows with elevation",
+       subtitle = sprintf("Adaptive (3-class); Spearman ρ = %.2f (p < 0.001)", rho$estimate)) +
+  theme_poster
+save_fig("08b_ratio_by_elevation_band.png", p, PANEL_W, 6)
 
 # ============================================================================
 # WHICH FLOOD TYPE CONTROLS THE TAIL
@@ -258,18 +296,18 @@ p <- dominant %>% count(return_period, lab) %>% group_by(return_period) %>% muta
   scale_fill_manual(values = type_colors, name = "Largest flood type") +
   scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
   labs(x = "Annual return period (years)", y = "Share of sites",
-       title = "Which flood type produces the largest floods?",
-       subtitle = "Type with the highest quantile at each site; Adaptive (3-class)") +
+       title = "Rain-on-snow dominates more rare floods",
+       subtitle = "Flood type with the largest quantile at each site") +
   theme_poster
-save_fig("09_dominant_type_by_rp.png", p, 7, 5)
+save_fig("09_dominant_type_by_rp.png", p, PANEL_W, 6)
 
 ## 10 Dominant type map at Q2 and Q100 ----
 dom_map <- stations %>% inner_join(dominant %>% filter(return_period %in% c(2, 100)), by = "site_no") %>%
   mutate(rp = factor(paste0(return_period, "-year"), levels = c("2-year", "100-year")))
-p <- co_map(dom_map, aes(colour = lab), size = 1.9) + facet_wrap(~ rp) +
+p <- co_map(dom_map, aes(colour = lab), size = 2.6) + facet_wrap(~ rp) +
   scale_colour_manual(values = type_colors, name = "Largest\nflood type") +
   labs(title = "Dominant flood type: common vs rare floods")
-save_fig("10_dominant_type_map_q2_q100.png", p, 10, 4.5)
+save_fig("10_dominant_type_map_q2_q100.png", p, WIDE_W, PANEL_H)
 
 # ============================================================================
 # EXAMPLE SITES
@@ -314,10 +352,10 @@ plot_example <- function(s) {
     theme_poster + theme(plot.title = element_text(size = 11))
 }
 message("  example sites: ", paste(example_sites, collapse = ", "))
-for (s in example_sites) save_fig(sprintf("11_example_curves_%s.png", s), plot_example(s), 6.5, 5)
+for (s in example_sites) save_fig(sprintf("11_example_curves_%s.png", s), plot_example(s))
 p <- wrap_plots(lapply(example_sites, plot_example), nrow = 1, guides = "collect") &
   theme(legend.position = "bottom")
-save_fig("11_example_curves_panel.png", p, 15, 5.5)
+save_fig("11_example_curves_panel.png", p, WIDE_W, 7.5)
 
 # ============================================================================
 # DIAGNOSTICS
@@ -337,7 +375,7 @@ p <- ggplot(xi_df, aes(lab, xi, fill = lab)) +
        subtitle = sprintf("Shaded: xi > 0.5 (%.0f%% of type fits); rain fraction (3-class)",
                           100 * mean(xi_df$xi[xi_df$curve_type != "single_sample"] > 0.5))) +
   theme_poster
-save_fig("12_shape_parameter.png", p, 7, 5)
+save_fig("12_shape_parameter.png", p)
 
 ## 13 Dispersion index of annual exceedance counts (S1; Proposal App. A.2) ----
 disp <- ffa_p %>% filter(method == MAIN_METHOD) %>%
@@ -357,7 +395,7 @@ disp_share <- disp %>% group_by(lab) %>%
 p <- ggplot(disp, aes(lab, D)) +
   geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
   geom_jitter(aes(colour = status), width = 0.25, height = 0, size = 1.3, alpha = 0.7) +
-  geom_text(data = disp_share, aes(lab, Inf, label = txt), vjust = 1.4, size = 3.6) +
+  geom_text(data = disp_share, aes(lab, Inf, label = txt), vjust = 1.4, size = pt_mm(14)) +
   scale_colour_manual(values = c("Consistent with Poisson" = "grey55", "Over-dispersed" = "#b2182b",
                                  "Under-dispersed" = "#2166ac"), name = NULL) +
   scale_y_continuous(expand = expansion(mult = c(0.05, 0.12))) +
@@ -365,7 +403,7 @@ p <- ggplot(disp, aes(lab, D)) +
        title = "Are annual exceedance counts Poisson?",
        subtitle = "Counts above u per qualifying water year; 95% chi-square bounds per site") +
   theme_poster
-save_fig("13_dispersion_index.png", p, 7, 5)
+save_fig("13_dispersion_index.png", p)
 saveRDS(disp, file.path(fig_dir, "dispersion_index.rds"))
 
 # ============================================================================
@@ -391,10 +429,10 @@ if (file.exists(sens_file)) {
   }
   save_fig("14_sensitivity_threshold.png",
            sens_plot("S3", "Sensitivity to the fitting threshold",
-                     "Interim rate-based threshold (baseline: ~1 exceedance per year); EQD replaces it later"), 7, 5)
+                     "Interim rate-based threshold (baseline: ~1 exceedance per year); EQD replaces it later"))
   save_fig("15_sensitivity_rain_fraction.png",
            sens_plot("S4", "Sensitivity to the rain-fraction cutoffs",
-                     "Baseline: alpha_r = 0.99, alpha_s = network median of mixed events"), 7, 5)
+                     "Baseline: alpha_r = 0.99, alpha_s = network median of mixed events"))
 } else {
   message("  (skipping 14-15: run _documentation/poster_sensitivity.R first)")
 }

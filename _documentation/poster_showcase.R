@@ -66,18 +66,20 @@ panel <- function(s, m, ylim, brks) {
   ggplot() +
     geom_vline(xintercept = 100, linetype = "dashed") +
     geom_point(data = ss_pts, aes(ri, peak_flow, shape = "Observed (single sample)"),
-               colour = "grey45", size = 2.6, stroke = 0.6) +
-    geom_point(data = pts, aes(ri, peak_flow, colour = lab), size = 1.6, alpha = 0.75) +
-    geom_line(data = cv, aes(ri, discharge_cfs, colour = lab, linetype = lab), linewidth = 1) +
+               colour = "grey45", size = 3.6, stroke = 0.9) +
+    geom_point(data = pts, aes(ri, peak_flow, colour = lab), size = 2.4, alpha = 0.75) +
+    geom_line(data = cv, aes(ri, discharge_cfs, colour = lab, linetype = lab), linewidth = 1.4) +
     scale_colour_manual(values = colors[brks], breaks = brks, limits = brks, name = NULL) +
     scale_linetype_manual(values = ltys[brks], breaks = brks, limits = brks, name = NULL) +
     scale_shape_manual(values = c("Observed (single sample)" = 1), name = NULL) +
     scale_x_log10(breaks = RP_BREAKS, limits = c(1.05, 500), name = "Annual Return Period (years)") +
     scale_y_log10(labels = scales::label_comma(), limits = ylim, name = "Peak Discharge (cfs)") +
     labs(title = method_titles[[m]]) +
-    theme_bw(base_size = 13) +
+    theme_bw(base_size = 18) +
     theme(panel.grid.minor = element_blank(), legend.position = "bottom",
-          plot.title = element_text(face = "bold", hjust = 0.5, size = 16)) +
+          plot.title = element_text(face = "bold", hjust = 0.5, size = 24),
+          axis.title = element_text(size = 16), axis.text = element_text(size = 14),
+          legend.text = element_text(size = 16), legend.key.width = unit(1.6, "cm")) +
     guides(colour = guide_legend(nrow = 2), linetype = guide_legend(nrow = 2))
 }
 
@@ -97,11 +99,13 @@ pair <- function(s, m1, m2, tag) {
       title = sprintf("Station %s — Poisson–GPD Flood Frequency Analysis", s),
       subtitle = sprintf("%s. %s vs. %s. Q100 mixture / single sample: %.2f vs. %.2f",
                          nm, method_titles[[m1]], method_titles[[m2]], ratio(m1), ratio(m2)),
-      theme = theme(plot.title = element_text(face = "bold", size = 17),
-                    plot.subtitle = element_text(colour = "grey40", size = 12))) &
+      theme = theme(plot.title = element_text(face = "bold", size = 24),
+                    plot.subtitle = element_text(colour = "grey40", size = 18))) &
     theme(legend.position = "bottom")
   f <- file.path(out_dir, sprintf("%s_%s.png", s, tag))
-  ggsave(f, p, width = 14, height = 7.5, dpi = 200)
+  # Exported at its placed size on the poster (two-column block, 20.15 in), 300 dpi,
+  # with the AGU 2025 text sizes (title 24, subtitle 18, axes 16/14, legend 16).
+  ggsave(f, p, width = 20.15, height = 10, dpi = 300, bg = "white")
   message("  ", f)
 }
 
