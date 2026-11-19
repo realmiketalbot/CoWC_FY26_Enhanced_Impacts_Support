@@ -281,4 +281,48 @@ p <- wrap_plots(lapply(examples, plot_example), nrow = 1, guides = "collect") +
   theme(legend.position = "bottom")
 save_fig("08_example_sites_old_vs_new.png", p, 15, 5.5)
 
+# ============================================================================
+# 09 Side-by-side scatter: mixture vs single sample, old vs new, at 2/10/100
+# ============================================================================
+sc <- bind_rows(
+  ratio_tbl(old_q, "Old: GPD (top-n, PoT RI)"),
+  ratio_tbl(new_q, "New: Poisson–GPD (annual T)")) %>%
+  filter(site_no %in% common, return_period %in% c(2, 10, 100)) %>%
+  mutate(version = factor(version, levels = c("Old: GPD (top-n, PoT RI)", "New: Poisson–GPD (annual T)")),
+         rp = factor(sprintf("%d-year", as.integer(return_period)), levels = c("2-year", "10-year", "100-year")))
+lim <- range(c(sc$mixture, sc$single_sample))
+lab09 <- sc %>% group_by(version, rp) %>%
+  summarise(txt = sprintf("mixture > single: %.0f%%\nmedian ratio: %.2f", 100 * mean(ratio > 1), median(ratio)),
+            .groups = "drop")
+p <- ggplot(sc, aes(single_sample, mixture)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_point(aes(colour = version), alpha = 0.6, size = 1.6) +
+  geom_text(data = lab09, aes(x = lim[1], y = lim[2], label = txt), hjust = 0, vjust = 1, size = 3.4) +
+  facet_grid(version ~ rp) +
+  scale_x_log10(labels = scales::label_comma(), limits = lim, name = "Single-sample discharge (cfs)") +
+  scale_y_log10(labels = scales::label_comma(), limits = lim, name = "Mixture discharge (cfs)") +
+  scale_colour_manual(values = version_colors, guide = "none") +
+  coord_equal() +
+  labs(title = "Mixture vs single sample, site by site: old vs new",
+       subtitle = sprintf("%d common sites; Adaptive (3-class). Dashed: 1:1", length(common)),
+       caption = axis_note) +
+  theme_review + theme(strip.text = element_text(face = "bold"))
+save_fig("09_scatter_grid_old_vs_new.png", p, 11, 8)
+
+# 09b The same at Q100 only, two panels side by side (proposal-figure style)
+p <- sc %>% filter(rp == "100-year") %>%
+  ggplot(aes(single_sample, mixture)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_point(aes(colour = version), alpha = 0.7, size = 2) +
+  geom_text(data = lab09 %>% filter(rp == "100-year"), aes(x = lim[1], y = lim[2], label = txt),
+            hjust = 0, vjust = 1, size = 3.8) +
+  facet_wrap(~ version) +
+  scale_x_log10(labels = scales::label_comma(), limits = lim, name = "Single-sample Q100 (cfs)") +
+  scale_y_log10(labels = scales::label_comma(), limits = lim, name = "Mixture Q100 (cfs)") +
+  scale_colour_manual(values = version_colors, guide = "none") +
+  coord_equal() +
+  labs(title = "Mixture vs single-sample Q100: old vs new", caption = axis_note) +
+  theme_review + theme(strip.text = element_text(face = "bold"))
+save_fig("09b_scatter_q100_old_vs_new.png", p, 10, 5.5)
+
 message("Done.")
